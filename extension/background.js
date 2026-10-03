@@ -1,18 +1,20 @@
 // EmailTracker Prime - Service Worker (Manifest V3)
 
-const DEFAULT_SERVER_URL = 'http://localhost:3000';
+const DEFAULT_SERVER_URL = 'https://email-tracker-prime.vercel.app';
 
 chrome.runtime.onInstalled.addListener(async () => {
   const data = await chrome.storage.local.get(['serverUrl', 'trackByDefault', 'showBadgesInGmail']);
   const updates = {};
-  if (!data.serverUrl) updates.serverUrl = DEFAULT_SERVER_URL;
+  if (!data.serverUrl || data.serverUrl.includes('localhost:3000')) {
+    updates.serverUrl = DEFAULT_SERVER_URL;
+  }
   if (data.trackByDefault === undefined) updates.trackByDefault = true;
   if (data.showBadgesInGmail === undefined) updates.showBadgesInGmail = true;
 
   if (Object.keys(updates).length > 0) {
     await chrome.storage.local.set(updates);
   }
-  console.log('[EmailTracker Service Worker] Installed & Initialized.');
+  console.log('[EmailTracker Service Worker] Installed & Initialized with:', updates.serverUrl || data.serverUrl);
 });
 
 async function getServerUrl() {

@@ -296,9 +296,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // -------------------------------------------------------------
 
   chrome.storage.local.get(['serverUrl', 'timezone', 'theme'], (data) => {
-    if (data.serverUrl) {
-      serverUrlInput.value = data.serverUrl;
-      if (openWebDashboard) openWebDashboard.href = data.serverUrl;
+    const defaultUrl = 'https://email-tracker-prime.vercel.app';
+    const effectiveUrl = (data.serverUrl && !data.serverUrl.includes('localhost:3000')) ? data.serverUrl : defaultUrl;
+    serverUrlInput.value = effectiveUrl;
+    if (openWebDashboard) openWebDashboard.href = effectiveUrl;
+    if (!data.serverUrl || data.serverUrl.includes('localhost:3000')) {
+      chrome.storage.local.set({ serverUrl: defaultUrl });
     }
     if (data.timezone) {
       selectedTimezone = data.timezone;

@@ -11,8 +11,11 @@
 
   // Initialize and maintain server URL & timezone in memory synchronously
   chrome.storage.local.get(['serverUrl', 'cachedEmails', 'timezone'], (data) => {
-    if (data && data.serverUrl && data.serverUrl.trim()) {
+    if (data && data.serverUrl && data.serverUrl.trim() && !data.serverUrl.includes('localhost:3000')) {
       currentServerUrl = data.serverUrl.trim().replace(/\/+$/, '');
+    } else {
+      currentServerUrl = 'https://email-tracker-prime.vercel.app';
+      chrome.storage.local.set({ serverUrl: currentServerUrl });
     }
     if (data && data.timezone) {
       selectedTimezone = data.timezone;
@@ -99,51 +102,89 @@
   // 1. SYNCHRONOUS CAPTURE TRACKING (FIRES ON MOUSEDOWN BEFORE GMAIL SENDS)
   // --------------------------------------------------------------------------
 
-  function getComposeContainer(triggerBtn, bodyEl) {
-    const start = triggerBtn || bodyEl || document.activeElement;
-    if (!start) return document.body;
-
-    return start.closest(
-      'div[role="dialog"], .AD, .M9, .inboxsdk__compose, .adn.ads, [role="listitem"], .ip, .aoI, form'
-    ) || document.body;
+  function getMyEmail() {
+    try {
+      const userEl = document.querySelector(
+        'header [aria-label*="@"], a[href*="SignOutOptions"], .gb_d[aria-label*="@"], [data-email]'
+      );
+      if (userEl) {
+        const text = (userEl.getAttribute('aria-label') || userEl.getAttribute('data-email') || userEl.getAttribute('href') || '');
+        const match = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        if (match) return match[0].toLowerCase().trim();
+      }
+    } catch (e) {}
+    return 'yalkhodary';
   }
 
-  function getActiveBodyElement(triggerBtn) {
+  function findSendButton(target) {
+    if (!target) return null;
+    return target.closest(
+      '[role="button"][data-tooltip*="Send" i], ' +
+      '[role="button"][data-tooltip*="إرسال"], ' +
+      '[role="button"][data-tooltip*="ارسال"], ' +
+      '[role="button"][aria-label*="Send" i], ' +
+      '[role="button"][aria-label*="إرسال"], ' +
+      '[role="button"][aria-label*="ارسال"], ' +
+      '.T-I.aoO, .T-I-atl, .aoO, ' +
+      'div.btC [role="button"]:first-child, ' +
+      'div[data-tooltip*="(Ctrl-Enter)"]'
+    );
+  }
+
+  function getActiveComposeContext(triggerEl) {
+    let container = null;
     let bodyEl = null;
 
-    // 1. Direct parent compose container from triggerBtn
-    if (triggerBtn) {
-      const container = getComposeContainer(triggerBtn);
-      if (container) {
-        bodyEl = container.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-        if (bodyEl) return { bodyEl, container };
+    // 1. Walk up from triggerEl to find a container with an editable message body
+    if (triggerEl) {
+      let curr = triggerEl;
+      while (curr && curr !== document.body) {
+        const ed = curr.querySelector('div[contenteditable="true"][role="textbox"], div[contenteditable="true"], .Am.Al.editable');
+        if (ed) {
+          bodyEl = ed;
+          container = curr;
+          break;
+        }
+        curr = curr.parentElement;
       }
     }
 
-    // 2. Focused element
-    const active = document.activeElement;
-    if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
-      bodyEl = active;
-      const container = getComposeContainer(null, bodyEl);
-      return { bodyEl, container };
-    }
-
-    // 3. Fallback: Any visible editable
-    const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-    for (const el of editables) {
-      if (el.offsetParent !== null) {
-        bodyEl = el;
-        const container = getComposeContainer(null, bodyEl);
-        return { bodyEl, container };
+    // 2. Focused element in compose box
+    if (!bodyEl) {
+      const active = document.activeElement;
+      if (active) {
+        if (active.isContentEditable || active.getAttribute('role') === 'textbox') {
+          bodyEl = active;
+          container = active.closest('div[role="dialog"], .AD, .M9, .inboxsdk__compose, .adn.ads, [role="listitem"], .ip, .aoI, form') || document.body;
+        } else {
+          const parentBox = active.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form');
+          if (parentBox) {
+            bodyEl = parentBox.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
+            container = parentBox;
+          }
+        }
       }
     }
 
-    return { bodyEl: editables[0] || null, container: document.body };
+    // 3. Fallback: Any visible editable on the page
+    if (!bodyEl) {
+      const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
+      for (const el of editables) {
+        if (el.offsetParent !== null) {
+          bodyEl = el;
+          container = el.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form') || document.body;
+          break;
+        }
+      }
+    }
+
+    return { bodyEl, container: container || document.body };
   }
 
   function extractRecipientFromPage(container) {
     const recipients = new Set();
     const searchScope = container || document.body;
+    const myEmail = getMyEmail();
 
     function addEmail(str) {
       if (!str || typeof str !== 'string') return;
@@ -151,46 +192,63 @@
       if (matches) {
         matches.forEach(m => {
           const em = m.trim().toLowerCase();
-          if (!em.includes('yalkhodary')) {
+          if (em !== myEmail && !em.includes(myEmail)) {
             recipients.add(em);
           }
         });
       }
     }
 
-    // 1. Direct recipient inputs and chips inside the compose box
-    searchScope.querySelectorAll('[email]').forEach(el => {
-      addEmail(el.getAttribute('email'));
-    });
-
-    searchScope.querySelectorAll('[data-hovercard-id]').forEach(el => {
-      addEmail(el.getAttribute('data-hovercard-id'));
-    });
-
-    searchScope.querySelectorAll('input[name="to"], input.vO, textarea[name="to"], input[name="toReal"]').forEach(inp => {
+    // 1. Direct inputs in the compose box (modern Gmail combobox, PeopleKit, standard inputs)
+    searchScope.querySelectorAll(
+      'input.agP, input[role="combobox"], input[name="to"], input[name="toReal"], input.vO, textarea[name="to"], input[aria-label*="To" i], input[aria-label*="إلى"], input[aria-label*="المستلم"]'
+    ).forEach(inp => {
       addEmail(inp.value);
     });
 
-    searchScope.querySelectorAll('.vR, .vN, .afV, .aoT, [peoplekit-id]').forEach(chip => {
-      addEmail(chip.getAttribute('email'));
-      addEmail(chip.getAttribute('data-hovercard-id'));
-      addEmail(chip.innerText || chip.textContent);
+    // 2. Chips and elements with email attributes inside the compose box
+    searchScope.querySelectorAll(
+      '[email], [data-hovercard-id], [peoplekit-id], .vR, .vN, .afV, .aoT, .amq, .amr, [role="gridcell"]'
+    ).forEach(el => {
+      addEmail(el.getAttribute('email'));
+      addEmail(el.getAttribute('data-hovercard-id'));
+      addEmail(el.getAttribute('data-recipient'));
+      addEmail(el.getAttribute('title'));
+      addEmail(el.innerText || el.textContent);
     });
 
-    // 2. In inline reply: scan thread sender headers on the page
+    // 3. Header areas inside the compose container
+    searchScope.querySelectorAll('.aoD, .hl, .aH9, .a5X, .aDj, .a6C').forEach(el => {
+      addEmail(el.innerText || el.textContent);
+    });
+
+    // 4. In inline reply: look at the thread, specifically the LAST message before the reply!
     if (recipients.size === 0) {
-      const senders = document.querySelectorAll('.gD[email], span[email]');
-      senders.forEach(el => {
-        addEmail(el.getAttribute('email'));
-      });
+      const messageCards = document.querySelectorAll('.adn.ads, [role="listitem"]');
+      if (messageCards.length > 0) {
+        // Find the sender of the latest message in this thread
+        for (let i = messageCards.length - 1; i >= 0; i--) {
+          const card = messageCards[i];
+          const senderEl = card.querySelector('.gD[email], span[email]');
+          if (senderEl) {
+            const senderEmail = (senderEl.getAttribute('email') || '').trim().toLowerCase();
+            if (senderEmail && senderEmail !== myEmail && !senderEmail.includes(myEmail)) {
+              recipients.add(senderEmail);
+              break;
+            }
+          }
+        }
+      }
     }
 
-    // 3. Fallback: check contact display name in reply header (e.g. "To: Whacka")
+    // 5. Fallback: contact display name in reply header (e.g. "To: Whacka")
     if (recipients.size === 0) {
-      const headerChips = document.querySelectorAll('.aoT, .vN, .vR');
+      const headerChips = searchScope.querySelectorAll('.aoT, .vN, .vR');
       headerChips.forEach(chip => {
-        const text = (chip.innerText || chip.textContent || '').replace(/^to:?\s*/i, '').trim();
-        if (text && text.length > 1 && !text.toLowerCase().includes('yalkhodary')) {
+        const text = (chip.innerText || chip.textContent || '')
+          .replace(/^(to|إلى):?\s*/i, '')
+          .trim();
+        if (text && text.length > 1 && text.toLowerCase() !== myEmail) {
           recipients.add(text);
         }
       });
@@ -228,7 +286,7 @@
   // Core tracking function executed SYNCHRONOUSLY
   function processTracking(triggerBtn) {
     try {
-      const { bodyEl, container } = getActiveBodyElement(triggerBtn);
+      const { bodyEl, container } = getActiveComposeContext(triggerBtn);
       if (!bodyEl) {
         console.warn('[EmailTracker] No editable body found.');
         return;
@@ -302,34 +360,25 @@
     }
   }
 
-  // Hook mousedown in CAPTURE phase (fires BEFORE Gmail's click handler)
+  // Hook mousedown & pointerdown in CAPTURE phase (fires BEFORE Gmail's click handler)
   document.addEventListener('mousedown', (e) => {
-    const target = e.target;
-    if (!target) return;
-
-    const sendBtn = target.closest(
-      '[role="button"][data-tooltip*="Send"], [role="button"][data-tooltip*="إرسال"], ' +
-      '[role="button"][aria-label*="Send"], [role="button"][aria-label*="إرسال"], ' +
-      '.T-I.aoO, .T-I-atl, .aoO'
-    );
-
+    const sendBtn = findSendButton(e.target);
     if (sendBtn) {
       console.log('[EmailTracker] Mousedown on Send detected!');
       processTracking(sendBtn);
     }
   }, true);
 
+  document.addEventListener('pointerdown', (e) => {
+    const sendBtn = findSendButton(e.target);
+    if (sendBtn) {
+      processTracking(sendBtn);
+    }
+  }, true);
+
   // Hook click in CAPTURE phase as well
   document.addEventListener('click', (e) => {
-    const target = e.target;
-    if (!target) return;
-
-    const sendBtn = target.closest(
-      '[role="button"][data-tooltip*="Send"], [role="button"][data-tooltip*="إرسال"], ' +
-      '[role="button"][aria-label*="Send"], [role="button"][aria-label*="إرسال"], ' +
-      '.T-I.aoO, .T-I-atl, .aoO'
-    );
-
+    const sendBtn = findSendButton(e.target);
     if (sendBtn) {
       processTracking(sendBtn);
     }
@@ -339,12 +388,65 @@
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       const active = document.activeElement;
-      if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
-        console.log('[EmailTracker] Ctrl+Enter detected in active editable!');
+      const isInCompose = active && (
+        active.isContentEditable || 
+        active.getAttribute('role') === 'textbox' || 
+        active.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form')
+      );
+      if (isInCompose) {
+        console.log('[EmailTracker] Ctrl+Enter detected in compose box!');
         processTracking(null);
       }
     }
   }, true);
+
+  // Hook form submit as an extra safety net
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (form && (form.querySelector('div[contenteditable="true"]') || form.closest('.AD, .M9, div[role="dialog"]'))) {
+      console.log('[EmailTracker] Form submit detected!');
+      processTracking(form);
+    }
+  }, true);
+
+  // --------------------------------------------------------------------------
+  // 1.5 LIVE COMPOSE WINDOW BADGE
+  // --------------------------------------------------------------------------
+
+  function decorateComposeWindows() {
+    const composeBoxes = document.querySelectorAll('div[role="dialog"], .AD, .M9, .inboxsdk__compose, .aoI, form');
+    composeBoxes.forEach(box => {
+      const sendBtn = findSendButton(box.querySelector('.T-I.aoO, .T-I-atl, .aoO, [role="button"][data-tooltip*="Send" i], [role="button"][data-tooltip*="إرسال"], [role="button"][data-tooltip*="ارسال"]'));
+      if (!sendBtn) return;
+
+      const toolbar = box.querySelector('.btC, .gU.Up, .gU') || sendBtn.parentElement;
+      if (!toolbar) return;
+
+      let badge = box.querySelector('.et-compose-badge');
+      const detectedRecip = extractRecipientFromPage(box);
+      const hasRecip = detectedRecip && detectedRecip !== 'مستلم عبر Gmail';
+      const labelText = hasRecip ? `تتبع نشط (${detectedRecip})` : 'EmailTracker نشط ✓✓';
+
+      if (badge) {
+        if (badge.dataset.recip !== detectedRecip) {
+          badge.dataset.recip = detectedRecip;
+          badge.innerHTML = `<span class="et-dot"></span><span>${labelText}</span>`;
+          badge.title = `EmailTracker Prime نشط!\nالمستلم: ${detectedRecip}\nسيتم تتبع فتح هذا الإيميل تلقائياً.`;
+        }
+      } else {
+        badge = document.createElement('div');
+        badge.className = 'et-compose-badge';
+        badge.dataset.recip = detectedRecip;
+        badge.innerHTML = `<span class="et-dot"></span><span>${labelText}</span>`;
+        badge.title = `EmailTracker Prime نشط!\nالمستلم: ${detectedRecip}\nسيتم تتبع فتح هذا الإيميل تلقائياً.`;
+        if (sendBtn.nextSibling) {
+          toolbar.insertBefore(badge, sendBtn.nextSibling);
+        } else {
+          toolbar.appendChild(badge);
+        }
+      }
+    });
+  }
 
   // --------------------------------------------------------------------------
   // 2. GMAIL ROWS: MAILTRACK-STYLE DOUBLE CHECKMARKS
@@ -472,23 +574,21 @@
 
         // 2. Strict matching (Recipient MUST match! We never match an email sent to a different recipient):
         if (!matchedEmail) {
-          for (const item of trackedEmails) {
-            if (usedEmailIds.has(item.id)) continue;
-
-            // Recipient check
-            if (!matchRecipient(recipCell, item.recipient)) continue;
-
+          const candidates = trackedEmails.filter(item => {
+            if (usedEmailIds.has(item.id)) return false;
+            if (!matchRecipient(recipCell, item.recipient)) return false;
             const itemSubject = cleanSubject(item.subject);
-            const subjMatch = itemSubject && rowSubject && (
+            return itemSubject && rowSubject && (
               rowSubject === itemSubject || 
               rowSubject.includes(itemSubject) || 
               itemSubject.includes(rowSubject)
             );
+          });
 
-            if (subjMatch) {
-              matchedEmail = item;
-              break;
-            }
+          if (candidates.length > 0) {
+            // Prioritize exact subject match, otherwise newest
+            const exact = candidates.find(item => cleanSubject(item.subject) === rowSubject);
+            matchedEmail = exact || candidates[0];
           }
         }
 
@@ -674,8 +774,8 @@
     const isSelfMutation = mutations.every(m => {
       const t = m.target;
       return t && (
-        (t.classList && (t.classList.contains('et-mailtrack-checks') || t.classList.contains('et-svg-icon') || t.classList.contains('et-toast') || t.classList.contains('et-modal-overlay'))) ||
-        (t.closest && t.closest('.et-mailtrack-checks, .et-modal-overlay, .et-toast'))
+        (t.classList && (t.classList.contains('et-mailtrack-checks') || t.classList.contains('et-compose-badge') || t.classList.contains('et-svg-icon') || t.classList.contains('et-toast') || t.classList.contains('et-modal-overlay'))) ||
+        (t.closest && t.closest('.et-mailtrack-checks, .et-compose-badge, .et-modal-overlay, .et-toast'))
       );
     });
 
@@ -683,6 +783,7 @@
 
     if (debounceTimeout) clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
+      decorateComposeWindows();
       neutralizeSelfPixels();
       decorateGmailRows();
       decorateThreadMessages();
@@ -693,12 +794,15 @@
 
   setInterval(() => {
     fetchTrackedEmails();
+    decorateComposeWindows();
   }, 10000);
 
   fetchTrackedEmails();
   setTimeout(() => {
+    decorateComposeWindows();
     decorateGmailRows();
     decorateThreadMessages();
   }, 1000);
 
 })();
+
