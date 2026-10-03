@@ -96,45 +96,60 @@
   }
 
   function extractRecipientFromPage(container) {
-    const found = new Set();
+    if (!container) return 'مستلم عبر Gmail';
 
-    if (container) {
-      container.querySelectorAll('span[email], [peoplekit-id]').forEach(el => {
-        const em = el.getAttribute('email') || el.innerText.trim();
-        if (em && em.includes('@')) found.add(em);
-      });
+    const recipients = new Set();
 
-      container.querySelectorAll('input[name="to"], textarea[name="to"], [aria-label*="To"], [aria-label*="إلى"]').forEach(inp => {
-        (inp.value || '').split(',').forEach(p => {
-          const em = p.replace(/[<>]/g, '').trim();
-          if (em.includes('@')) found.add(em);
-        });
-      });
-    }
-
-    // Search anywhere in thread headers
-    const threadEmailEls = document.querySelectorAll('.adn [email], .ads [email], span.gD[email], span.gI[email], span[data-hovercard-id]');
-    threadEmailEls.forEach(el => {
-      const em = el.getAttribute('email') || el.getAttribute('data-hovercard-id') || el.innerText.trim();
-      if (em && em.includes('@')) found.add(em);
+    // 1. Direct recipient chips inside the compose/reply box
+    const chips = container.querySelectorAll('span[email], [peoplekit-id], .vR span[email]');
+    chips.forEach(chip => {
+      const em = chip.getAttribute('email') || chip.innerText.trim();
+      if (em && em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
+        recipients.add(em.trim());
+      }
     });
 
-    // Search raw text in thread: "to user@domain.com"
-    const bodyText = document.body.innerText;
-    const regex = /to\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
-    let match;
-    while ((match = regex.exec(bodyText)) !== null) {
-      found.add(match[1]);
+    // 2. Direct input fields in compose/reply box
+    const toInputs = container.querySelectorAll('input[name="to"], textarea[name="to"]');
+    toInputs.forEach(inp => {
+      if (inp.value && inp.value.includes('@')) {
+        inp.value.split(',').forEach(part => {
+          const em = part.replace(/[<>]/g, '').trim();
+          if (em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
+            recipients.add(em);
+          }
+        });
+      }
+    });
+
+    // 3. In Inline Reply: the chip in the header of the reply box (e.g. .aoT)
+    if (recipients.size === 0) {
+      const replyHeaderChip = container.querySelector('.aoT, .vN, span[data-hovercard-id]');
+      if (replyHeaderChip) {
+        const em = replyHeaderChip.getAttribute('data-hovercard-id') || replyHeaderChip.getAttribute('email') || replyHeaderChip.textContent.trim();
+        const match = em.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        if (match && !match[0].toLowerCase().includes('yalkhodary')) {
+          recipients.add(match[0]);
+        }
+      }
     }
 
-    const arr = Array.from(found);
-    if (arr.length > 1) {
-      // Filter out sender's own email
-      const filtered = arr.filter(e => !e.toLowerCase().includes('yalkhodary'));
-      if (filtered.length > 0) return filtered.join(', ');
+    // 4. Fallback for inline reply: check ONLY the immediate message container above the reply
+    if (recipients.size === 0) {
+      const parentMsg = container.closest('.adn, .ads, [role="listitem"]');
+      if (parentMsg) {
+        const prevSender = parentMsg.querySelector('.gD[email], span[email]');
+        if (prevSender) {
+          const em = prevSender.getAttribute('email');
+          if (em && em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
+            recipients.add(em.trim());
+          }
+        }
+      }
     }
 
-    return arr.length > 0 ? arr.join(', ') : 'joodevo890@gmail.com';
+    const arr = Array.from(recipients);
+    return arr.length > 0 ? arr.slice(0, 2).join(', ') : 'joodevo890@gmail.com';
   }
 
   function extractSubjectFromPage(container) {

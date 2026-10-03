@@ -138,6 +138,16 @@ app.delete('/api/emails/:id', async (req, res) => {
   }
 });
 
+// Clear all emails
+app.post('/api/emails/clear', async (req, res) => {
+  try {
+    await db.clearAllEmails();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Stats overview
 app.get('/api/stats', async (req, res) => {
   try {
@@ -485,6 +495,10 @@ app.get('/', async (req, res) => {
               </div>
             </div>
             <div class="header-actions">
+              <button onclick="if(confirm('هل أنت متأكد من رغبتك في مسح كل السجلات والبدء من جديد؟')) { fetch('/api/emails/clear', {method:'POST'}).then(() => location.reload()); }" class="refresh-btn" style="color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
+                <span>🗑️</span>
+                <span>مسح السجل</span>
+              </button>
               <a href="javascript:location.reload()" class="refresh-btn">
                 <span>🔄</span>
                 <span>تحديث البيانات</span>

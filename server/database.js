@@ -266,6 +266,17 @@ const db = {
     return false;
   },
 
+  async clearAllEmails() {
+    if (redis) {
+      try {
+        await redis.del(REDIS_KEY);
+      } catch (e) {}
+    }
+    emailsCache = {};
+    if (!redis) saveLocalDatabase();
+    return true;
+  },
+
   async getStats() {
     const list = await this.getAllEmails();
     const totalSent = list.length;

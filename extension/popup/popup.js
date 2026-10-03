@@ -256,6 +256,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const btnClearAll = document.getElementById('btn-clear-all');
+  if (btnClearAll) {
+    btnClearAll.addEventListener('click', () => {
+      if (confirm('هل تريد مسح جميع الإيميلات المسجلة والبدء من جديد؟')) {
+        chrome.storage.local.set({ cachedEmails: [] }, () => {
+          chrome.storage.local.get(['serverUrl'], (data) => {
+            if (data.serverUrl) {
+              fetch(`${data.serverUrl.replace(/\/+$/, '')}/api/emails/clear`, { method: 'POST' }).catch(() => {});
+            }
+          });
+          allEmails = [];
+          renderEmails();
+          loadStats();
+          settingsMsg.className = 'settings-msg success';
+          settingsMsg.textContent = 'تم مسح السجلات بنجاح!';
+          setTimeout(() => { settingsMsg.textContent = ''; }, 2000);
+        });
+      }
+    });
+  }
+
   checkServerHealth();
   loadEmails();
 });
