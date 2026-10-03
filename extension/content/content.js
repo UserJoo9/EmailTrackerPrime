@@ -494,6 +494,13 @@
 
   // Neutralize any tracking pixels rendered in the sender's own view (Sent messages view)
   function neutralizeSelfPixels() {
+    // ONLY neutralize if the user is in the Sent folder (#sent)
+    // If the user is in Inbox (#inbox) reading as recipient, do NOT neutralize!
+    const isSentFolder = window.location.hash.includes('#sent');
+    if (!isSentFolder) {
+      return;
+    }
+
     const pixels = document.querySelectorAll('img[src*="/track/pixel/"]');
     pixels.forEach(p => {
       // Only neutralize if it is rendered in an existing message, not while actively composing

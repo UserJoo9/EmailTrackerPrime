@@ -175,10 +175,10 @@ const db = {
         reads: []
       };
     } else {
-      // Ignore hits within 15 seconds of creation (Sender compose / send self-render)
+      // Ignore hits within 4 seconds of creation (Sender compose / send self-render)
       if (target.sentAt) {
         const diffMs = new Date(now).getTime() - new Date(target.sentAt).getTime();
-        if (diffMs < 15000) {
+        if (diffMs < 4000) {
           console.log(`[Self-Open Ignored] Hit occurred only ${Math.round(diffMs / 1000)}s after sending (Sender compose/send self-render).`);
           return target;
         }
