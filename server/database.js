@@ -102,12 +102,14 @@ const REDIS_KEY = 'emailtracker:emails';
 
 const db = {
   // Save newly registered email
-  async saveEmail({ id, recipient, subject, sentAt }) {
+  async saveEmail({ id, recipient, subject, sentAt, isFollowUp }) {
     const now = sentAt || new Date().toISOString();
+    const isReplyOrFollowUp = Boolean(isFollowUp || (subject && /^(re:|fwd:|رد:|متابعة:)/i.test(subject)));
     const record = {
       id,
       recipient: recipient || 'مستلم عبر Gmail',
       subject: subject || 'بدون عنوان',
+      isFollowUp: isReplyOrFollowUp,
       sentAt: now,
       sentAtFormatted: formatTimestamp(now),
       isRead: false,

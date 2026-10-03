@@ -141,7 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return `
         <div class="email-card ${isRead ? 'is-read' : 'is-unread'}">
           <div class="card-header">
-            <div class="card-recip" title="${email.recipient}">${email.recipient}</div>
+            <div class="card-recip" title="${email.recipient}">
+              ${email.recipient}
+              ${email.isFollowUp ? '<span class="chip-followup">متابعة / رد</span>' : ''}
+            </div>
             <span class="card-chip ${isRead ? 'chip-read' : 'chip-pending'}">
               <span>${isRead ? '✓✓ مقروء' : '✓ مرسل'}</span>
             </span>

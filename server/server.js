@@ -67,14 +67,14 @@ app.get('/pixel/:id.gif', handlePixel);
 // Register a newly sent email
 app.post('/api/emails', async (req, res) => {
   try {
-    const { id, recipient, subject, sentAt } = req.body;
+    const { id, recipient, subject, sentAt, isFollowUp } = req.body;
 
     if (!id) {
       return res.status(400).json({ error: 'Tracking ID is required' });
     }
 
-    const email = await db.saveEmail({ id, recipient, subject, sentAt });
-    console.log(`[EMAIL REGISTERED] ID: ${id} | To: ${recipient} | Subject: ${subject}`);
+    const email = await db.saveEmail({ id, recipient, subject, sentAt, isFollowUp });
+    console.log(`[EMAIL REGISTERED] ID: ${id} | To: ${recipient} | Subject: ${subject} | FollowUp: ${email.isFollowUp}`);
     res.status(201).json({ success: true, email });
   } catch (err) {
     console.error('[API Error /api/emails POST]', err);
@@ -562,6 +562,7 @@ app.get('/', async (req, res) => {
                         <span class="status-chip ${e.isRead ? 'is-read' : 'is-pending'}">
                           ${e.isRead ? '✓✓ تم الفتح' : '⏳ لم يُقرأ بعد'}
                         </span>
+                        ${e.isFollowUp ? '<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 2px 7px; border-radius: 6px; font-size: 11px; margin-right: 6px; font-weight: 700;">متابعة / رد</span>' : ''}
                       </td>
                       <td style="font-weight: 700; color: #f1f5f9;">${e.recipient}</td>
                       <td style="color: #cbd5e1; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${e.subject || '(بدون عنوان)'}</td>
