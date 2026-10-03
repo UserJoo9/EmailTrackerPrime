@@ -99,104 +99,120 @@
   // 1. SYNCHRONOUS CAPTURE TRACKING (FIRES ON MOUSEDOWN BEFORE GMAIL SENDS)
   // --------------------------------------------------------------------------
 
+  function getComposeContainer(triggerBtn, bodyEl) {
+    const start = triggerBtn || bodyEl || document.activeElement;
+    if (!start) return document.body;
+
+    return start.closest(
+      'div[role="dialog"], .AD, .M9, .inboxsdk__compose, .adn.ads, [role="listitem"], .ip, .aoI, form'
+    ) || document.body;
+  }
+
   function getActiveBodyElement(triggerBtn) {
-    // 1. Walk up from the button
-    let parent = triggerBtn ? triggerBtn.parentElement : null;
-    while (parent && parent !== document.body) {
-      const el = parent.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-      if (el) return { bodyEl: el, container: parent };
-      parent = parent.parentElement;
-    }
+    let bodyEl = null;
 
-    // 2. Currently focused element
-    const active = document.activeElement;
-    if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
-      const cont = active.closest('form, table, div[role="region"], div[role="dialog"], .M9, .ip') || active.parentElement;
-      return { bodyEl: active, container: cont };
-    }
-
-    // 3. Any visible contenteditable on the page
-    const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"]');
-    for (const el of editables) {
-      if (el.offsetParent !== null) {
-        const cont = el.closest('form, table, div[role="region"], div[role="dialog"], .M9, .ip') || el.parentElement;
-        return { bodyEl: el, container: cont };
+    // 1. Direct parent compose container from triggerBtn
+    if (triggerBtn) {
+      const container = getComposeContainer(triggerBtn);
+      if (container) {
+        bodyEl = container.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
+        if (bodyEl) return { bodyEl, container };
       }
     }
 
-    return { bodyEl: editables[0] || null, container: null };
+    // 2. Focused element
+    const active = document.activeElement;
+    if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
+      bodyEl = active;
+      const container = getComposeContainer(null, bodyEl);
+      return { bodyEl, container };
+    }
+
+    // 3. Fallback: Any visible editable
+    const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
+    for (const el of editables) {
+      if (el.offsetParent !== null) {
+        bodyEl = el;
+        const container = getComposeContainer(null, bodyEl);
+        return { bodyEl, container };
+      }
+    }
+
+    return { bodyEl: editables[0] || null, container: document.body };
   }
 
   function extractRecipientFromPage(container) {
-    if (!container) return 'مستلم عبر Gmail';
-
     const recipients = new Set();
+    const searchScope = container || document.body;
 
-    // 1. Direct recipient chips inside the compose/reply box
-    const chips = container.querySelectorAll('span[email], [peoplekit-id], .vR span[email]');
-    chips.forEach(chip => {
-      const em = chip.getAttribute('email') || chip.innerText.trim();
-      if (em && em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
-        recipients.add(em.trim());
-      }
-    });
-
-    // 2. Direct input fields in compose/reply box
-    const toInputs = container.querySelectorAll('input[name="to"], textarea[name="to"]');
-    toInputs.forEach(inp => {
-      if (inp.value && inp.value.includes('@')) {
-        inp.value.split(',').forEach(part => {
-          const em = part.replace(/[<>]/g, '').trim();
-          if (em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
+    function addEmail(str) {
+      if (!str || typeof str !== 'string') return;
+      const matches = str.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+      if (matches) {
+        matches.forEach(m => {
+          const em = m.trim().toLowerCase();
+          if (!em.includes('yalkhodary')) {
             recipients.add(em);
           }
         });
       }
+    }
+
+    // 1. Check direct attributes in compose container
+    searchScope.querySelectorAll('[email]').forEach(el => {
+      addEmail(el.getAttribute('email'));
     });
 
-    // 3. In Inline Reply: the chip in the header of the reply box (e.g. .aoT)
+    searchScope.querySelectorAll('[data-hovercard-id]').forEach(el => {
+      addEmail(el.getAttribute('data-hovercard-id'));
+    });
+
+    searchScope.querySelectorAll('input[name="to"], input.vO, textarea[name="to"], input[name="toReal"]').forEach(inp => {
+      addEmail(inp.value);
+    });
+
+    searchScope.querySelectorAll('.vR, .vN, .afV, .aoT, [peoplekit-id]').forEach(chip => {
+      addEmail(chip.getAttribute('email'));
+      addEmail(chip.getAttribute('data-hovercard-id'));
+      addEmail(chip.innerText || chip.textContent);
+    });
+
+    // 2. Inline reply: check previous message sender in thread
     if (recipients.size === 0) {
-      const replyHeaderChip = container.querySelector('.aoT, .vN, span[data-hovercard-id]');
-      if (replyHeaderChip) {
-        const em = replyHeaderChip.getAttribute('data-hovercard-id') || replyHeaderChip.getAttribute('email') || replyHeaderChip.textContent.trim();
-        const match = em.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-        if (match && !match[0].toLowerCase().includes('yalkhodary')) {
-          recipients.add(match[0]);
-        }
+      const parentMsg = searchScope.closest('.adn, .ads, [role="listitem"]');
+      if (parentMsg) {
+        parentMsg.querySelectorAll('.gD[email], span[email]').forEach(el => {
+          addEmail(el.getAttribute('email'));
+        });
       }
     }
 
-    // 4. Fallback for inline reply: check ONLY the immediate message container above the reply
+    // 3. Global active compose search
     if (recipients.size === 0) {
-      const parentMsg = container.closest('.adn, .ads, [role="listitem"]');
-      if (parentMsg) {
-        const prevSender = parentMsg.querySelector('.gD[email], span[email]');
-        if (prevSender) {
-          const em = prevSender.getAttribute('email');
-          if (em && em.includes('@') && !em.toLowerCase().includes('yalkhodary')) {
-            recipients.add(em.trim());
-          }
-        }
-      }
+      document.querySelectorAll('.AD [email], .M9 [email], div[role="dialog"] [email], .AD input.vO, .M9 input.vO').forEach(el => {
+        addEmail(el.getAttribute('email') || el.value);
+      });
     }
 
     const arr = Array.from(recipients);
-    return arr.length > 0 ? arr.slice(0, 2).join(', ') : 'joodevo890@gmail.com';
+    return arr.length > 0 ? arr.slice(0, 2).join(', ') : 'مستلم عبر Gmail';
   }
 
   function extractSubjectFromPage(container) {
-    if (container) {
-      const subjInput = container.querySelector('input[name="subjectbox"]');
-      if (subjInput && subjInput.value.trim()) {
-        const val = subjInput.value.trim();
-        return { subject: val, isFollowUp: /^(re:|fwd:|رد:|متابعة:)/i.test(val) };
-      }
+    const searchScope = container || document.body;
+
+    // 1. Look for subjectbox in the container or dialog
+    const subjInput = searchScope.querySelector('input[name="subjectbox"]') || 
+                      document.querySelector('.AD input[name="subjectbox"], .M9 input[name="subjectbox"]');
+    if (subjInput && subjInput.value.trim()) {
+      const val = subjInput.value.trim();
+      return { subject: val, isFollowUp: /^(re:|fwd:|رد:|متابعة:)/i.test(val) };
     }
 
+    // 2. In-thread reply title
     const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
     if (threadTitleEl && threadTitleEl.textContent.trim()) {
       let subj = threadTitleEl.textContent.split('\n')[0].trim();
-      // Remove any trailing snippet text
       subj = subj.replace(/\s+-\s+.*$/, '').trim();
       if (!/^(re:|fwd:|رد:|متابعة:)/i.test(subj)) {
         subj = 'رد: ' + subj;
