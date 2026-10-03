@@ -1,4 +1,4 @@
-// EmailTracker Prime - Content Script for Gmail (Automatic Tracking, Reply/Follow-up & In-Thread Badges)
+// EmailTracker Prime - Content Script for Gmail (Mailtrack-Style Checkmarks & Automatic Tracking)
 
 (function () {
   'use strict';
@@ -64,7 +64,6 @@
   // --------------------------------------------------------------------------
 
   function attachAutomaticTracking() {
-    // Find all Send buttons anywhere in Gmail (Compose, Inline Reply, Forward)
     const sendButtons = document.querySelectorAll(
       '[role="button"][data-tooltip*="Send"], .T-I.J-J5-Ji.aoO.v7.T-I-atl.L3, [aria-label*="Send"], [aria-label*="إرسال"]'
     );
@@ -74,16 +73,14 @@
       btn.dataset.etHooked = 'true';
 
       const handleSend = () => {
-        // Find closest editor container
         const container = btn.closest('.M9, [role="dialog"], [role="region"], .AD, .aoP, form, table') || btn.parentElement.parentElement;
 
-        // Editable body
         const bodyEl = container?.querySelector('div[aria-label="Message Body"], div[role="textbox"], .Am.Al.editable') ||
                        document.querySelector('div[aria-label="Message Body"], div[role="textbox"], .Am.Al.editable');
 
         if (!bodyEl) return;
 
-        // 1. Detect Subject (and detect if this is a Follow-up / Reply)
+        // 1. Detect Subject
         let subject = '';
         let isFollowUp = false;
 
@@ -94,7 +91,6 @@
             isFollowUp = true;
           }
         } else {
-          // Inline Reply in a thread: subject is the thread title
           const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
           if (threadTitleEl && threadTitleEl.textContent.trim()) {
             subject = 'رد: ' + threadTitleEl.textContent.trim();
@@ -107,8 +103,6 @@
 
         // 2. Extract Recipient
         const recipientList = [];
-
-        // Check chips in compose / reply box
         const chips = (container || document).querySelectorAll('span[email], [peoplekit-id]');
         chips.forEach(chip => {
           const email = chip.getAttribute('email') || chip.innerText.trim();
@@ -117,7 +111,6 @@
           }
         });
 
-        // Check input fields
         if (recipientList.length === 0) {
           const toInputs = (container || document).querySelectorAll('input[name="to"], textarea[name="to"], [aria-label*="To"]');
           toInputs.forEach(inp => {
@@ -130,7 +123,6 @@
           });
         }
 
-        // If still empty (inline reply), inspect the thread messages
         if (recipientList.length === 0) {
           const threadEmails = document.querySelectorAll('.adn [email], .ads [email], span.gD[email], span.gI[email]');
           threadEmails.forEach(el => {
@@ -141,18 +133,9 @@
           });
         }
 
-        // Final fallback from thread details
-        if (recipientList.length === 0) {
-          const toSpan = document.querySelector('span[data-hovercard-id], span[email]');
-          if (toSpan) {
-            const em = toSpan.getAttribute('data-hovercard-id') || toSpan.getAttribute('email');
-            if (em && em.includes('@')) recipientList.push(em);
-          }
-        }
-
         const recipient = recipientList.join(', ') || 'مستلم في Gmail';
 
-        // 3. Remove old/stale pixels and append fresh tracking pixel
+        // 3. Remove old pixels and append fresh tracking pixel
         const existingPixels = bodyEl.querySelectorAll('img[data-et-id]');
         existingPixels.forEach(p => p.remove());
 
@@ -169,7 +152,7 @@
 
         bodyEl.appendChild(pixelImg);
 
-        // 4. Register with backend & local cache
+        // 4. Register in backend
         const payload = {
           id: trackingId,
           recipient: recipient,
@@ -189,7 +172,6 @@
 
       btn.addEventListener('click', handleSend, true);
 
-      // Support Enter shortcuts
       const bodyEl = btn.closest('.M9, [role="dialog"], [role="region"], table')?.querySelector('div[role="textbox"]');
       if (bodyEl) {
         bodyEl.addEventListener('keydown', (e) => {
@@ -202,7 +184,7 @@
   }
 
   // --------------------------------------------------------------------------
-  // 2. GMAIL ROWS LIST BADGES (Sent / Inbox lists)
+  // 2. GMAIL ROWS: MAILTRACK-STYLE DOUBLE CHECKMARKS (Between Star and Recipient)
   // --------------------------------------------------------------------------
 
   function cleanSubject(str) {
@@ -214,84 +196,107 @@
       .toLowerCase();
   }
 
+  function createMailtrackBadge(matched) {
+    const badge = document.createElement('span');
+    badge.className = `et-mailtrack-checks ${matched.isRead ? 'et-is-read' : 'et-is-pending'}`;
+    badge.dataset.emailId = matched.id;
+    badge.dataset.isRead = String(matched.isRead);
+
+    const dateStr = matched.firstReadAtFormatted 
+      ? matched.firstReadAtFormatted.formatted 
+      : (matched.firstReadAt ? new Date(matched.firstReadAt).toLocaleString('ar-EG') : null);
+
+    badge.title = matched.isRead 
+      ? `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matched.openCount} مرة\n(انقر لعرض التفاصيل)` 
+      : `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${matched.sentAtFormatted ? matched.sentAtFormatted.formatted : new Date(matched.sentAt).toLocaleString('ar-EG')}`;
+
+    // Clean Mailtrack-style SVG double checkmark icon
+    badge.innerHTML = `
+      <svg class="et-svg-icon" viewBox="0 0 16 11" width="16" height="11" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path class="et-chk-left" d="M1 5.5L4 8.5L9.5 2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path class="et-chk-right" d="M6 5.5L9 8.5L14.5 2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+
+    badge.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openEmailDetailsModal(matched.id);
+    });
+
+    return badge;
+  }
+
   function decorateGmailRows() {
     if (!trackedEmails || trackedEmails.length === 0) return;
 
     const rows = document.querySelectorAll('tr.zA, tr[role="row"]');
 
     rows.forEach((row) => {
+      // Find subject & recipient
       const subjectSpan = row.querySelector('.y6 span.bog, .bqe, .bog, span[data-thread-id]');
-      if (!subjectSpan) return;
+      const recipCell = row.querySelector('.yW, .yX.xY, td.yX');
 
-      const rowSubject = cleanSubject(subjectSpan.textContent);
-      if (!rowSubject) return;
+      const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
+      const rowRecipText = (recipCell ? recipCell.textContent : '').toLowerCase().trim();
 
-      const matchedEmail = trackedEmails.find((item) => {
+      // Find matching tracked email
+      let matchedEmail = null;
+
+      for (const item of trackedEmails) {
         const itemSubject = cleanSubject(item.subject);
-        return itemSubject && (itemSubject === rowSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject));
-      });
+        const itemRecip = (item.recipient || '').toLowerCase().trim();
+        const recipUser = itemRecip.split('@')[0];
+
+        // 1. Direct subject match
+        if (itemSubject && rowSubject && (rowSubject === itemSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject))) {
+          matchedEmail = item;
+          break;
+        }
+
+        // 2. Recipient match in Sent folder (e.g. "To: joodevo890")
+        if (recipUser && rowRecipText && (rowRecipText.includes(recipUser) || rowRecipText.includes(itemRecip))) {
+          matchedEmail = item;
+          break;
+        }
+      }
 
       if (!matchedEmail) return;
 
-      let existingBadge = row.querySelector('.et-row-badge');
-      if (existingBadge) {
-        if (existingBadge.dataset.emailId === matchedEmail.id && existingBadge.dataset.isRead === String(matchedEmail.isRead)) {
+      // Target placement: In Gmail, the recipient column is .yW inside td.yX.xY
+      // Prepending here places the checkmark EXACTLY between the Star and "To: ..."!
+      const targetContainer = row.querySelector('.yW') || row.querySelector('.yX.xY') || recipCell;
+      if (!targetContainer) return;
+
+      let existing = targetContainer.querySelector('.et-mailtrack-checks');
+      if (existing) {
+        if (existing.dataset.emailId === matchedEmail.id && existing.dataset.isRead === String(matchedEmail.isRead)) {
           return;
         }
-        existingBadge.remove();
+        existing.remove();
       }
 
-      const badge = document.createElement('span');
-      badge.className = `et-row-badge ${matchedEmail.isRead ? 'et-is-read' : 'et-is-pending'}`;
-      badge.dataset.emailId = matchedEmail.id;
-      badge.dataset.isRead = String(matchedEmail.isRead);
-
-      let tooltipText = '';
-      if (matchedEmail.isRead) {
-        const dateStr = matchedEmail.firstReadAtFormatted ? matchedEmail.firstReadAtFormatted.formatted : new Date(matchedEmail.firstReadAt).toLocaleString('ar-EG');
-        tooltipText = `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matchedEmail.openCount} مرة\n(انقر لمشاهدة التفاصيل)`;
-      } else {
-        const sentStr = matchedEmail.sentAtFormatted ? matchedEmail.sentAtFormatted.formatted : new Date(matchedEmail.sentAt).toLocaleString('ar-EG');
-        tooltipText = `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${sentStr}`;
-      }
-
-      badge.title = tooltipText;
-
-      badge.innerHTML = `
-        <span class="et-checks">✓✓</span>
-        ${matchedEmail.isFollowUp ? '<span class="et-followup-tag">متابعة</span>' : ''}
-        ${matchedEmail.openCount > 1 ? `<span class="et-count">${matchedEmail.openCount}</span>` : ''}
-      `;
-
-      badge.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openEmailDetailsModal(matchedEmail.id);
-      });
-
-      subjectSpan.parentElement.insertBefore(badge, subjectSpan);
+      const badge = createMailtrackBadge(matchedEmail);
+      targetContainer.prepend(badge);
     });
   }
 
   // --------------------------------------------------------------------------
-  // 3. IN-THREAD MESSAGE BADGES (Inside open email conversation threads)
+  // 3. IN-THREAD MESSAGE HEADERS
   // --------------------------------------------------------------------------
 
   function decorateThreadMessages() {
     if (!trackedEmails || trackedEmails.length === 0) return;
 
-    // Check thread title
     const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
     if (!threadTitleEl) return;
     const threadSubject = cleanSubject(threadTitleEl.textContent);
 
-    // Find all message headers inside the thread
     const messageHeaders = document.querySelectorAll('.gE.iv.gt, .adn.ads .gH');
 
     messageHeaders.forEach((header) => {
-      if (header.querySelector('.et-thread-badge')) return;
+      if (header.querySelector('.et-thread-checks')) return;
 
-      // Find matching tracked email
       const matchedEmail = trackedEmails.find((item) => {
         const itemSubject = cleanSubject(item.subject);
         return itemSubject && (itemSubject === threadSubject || threadSubject.includes(itemSubject) || itemSubject.includes(threadSubject));
@@ -301,24 +306,8 @@
 
       const dateContainer = header.querySelector('.gK, .gH span.g3, .xW') || header;
 
-      const badge = document.createElement('span');
-      badge.className = `et-row-badge et-thread-badge ${matchedEmail.isRead ? 'et-is-read' : 'et-is-pending'}`;
-      badge.dataset.emailId = matchedEmail.id;
-      badge.title = matchedEmail.isRead 
-        ? `تمت القراءة! تاريخ الفتح: ${matchedEmail.firstReadAtFormatted ? matchedEmail.firstReadAtFormatted.formatted : new Date(matchedEmail.firstReadAt).toLocaleString('ar-EG')}` 
-        : `لم يُقرأ بعد`;
-
-      badge.innerHTML = `
-        <span class="et-checks">✓✓</span>
-        <span style="font-size: 10px; margin-right: 2px;">${matchedEmail.isRead ? 'مقروء' : 'مرسل'}</span>
-        ${matchedEmail.openCount > 1 ? `<span class="et-count">${matchedEmail.openCount}</span>` : ''}
-      `;
-
-      badge.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openEmailDetailsModal(matchedEmail.id);
-      });
+      const badge = createMailtrackBadge(matchedEmail);
+      badge.classList.add('et-thread-checks');
 
       dateContainer.prepend(badge);
     });

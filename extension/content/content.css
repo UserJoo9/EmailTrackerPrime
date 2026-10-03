@@ -1,54 +1,52 @@
-/* EmailTracker Prime - Sleek Gmail Content Styles */
+/* EmailTracker Prime - Sleek Gmail Checkmark Styles (Mailtrack Style) */
 
-/* Double Checkmark Badge in Gmail Rows */
-.et-row-badge {
+/* Double Checkmark Icon between Star and Recipient (Mailtrack Style) */
+.et-mailtrack-checks {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  margin-right: 6px;
-  margin-left: 2px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
+  justify-content: center;
   vertical-align: middle;
-  line-height: 1.2;
-  transition: transform 0.15s ease, background-color 0.15s ease;
+  margin-right: 8px;
+  margin-left: 4px;
+  cursor: pointer;
+  transition: transform 0.15s ease;
   user-select: none;
 }
 
-.et-row-badge:hover {
-  transform: scale(1.08);
+.et-mailtrack-checks:hover {
+  transform: scale(1.25);
 }
 
-/* Sent & Unopened: subtle grey double checks */
-.et-row-badge.et-is-pending {
-  color: #9aa0a6;
-  background: rgba(154, 160, 166, 0.12);
-  border: 1px solid rgba(154, 160, 166, 0.2);
+.et-svg-icon {
+  display: block;
 }
 
-/* Opened & Read: vibrant emerald green double checks */
-.et-row-badge.et-is-read {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.14);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+/* Sent & Unopened: First check Green, Second check Grey/White */
+.et-is-pending .et-chk-left {
+  stroke: #10b981;
+}
+.et-is-pending .et-chk-right {
+  stroke: #94a3b8;
 }
 
-.et-checks {
-  font-size: 13px;
-  letter-spacing: -2px;
-  display: inline-block;
+/* Opened & Read: Both checks Emerald Green */
+.et-is-read .et-chk-left {
+  stroke: #10b981;
+}
+.et-is-read .et-chk-right {
+  stroke: #10b981;
+  filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.5));
 }
 
-.et-count {
-  font-size: 10px;
-  font-weight: 700;
-  background: rgba(16, 185, 129, 0.2);
-  padding: 0 4px;
-  border-radius: 6px;
-  margin-left: 2px;
+/* In-Thread Messages Checkmark */
+.et-thread-checks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  margin-right: 8px;
+  vertical-align: middle;
+  cursor: pointer;
 }
 
 /* Floating Notification Toast in Gmail */
