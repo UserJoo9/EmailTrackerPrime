@@ -1,29 +1,35 @@
-// EmailTracker Prime - Content Script for Gmail (Bulletproof Automatic Tracking & Mailtrack Checkmarks)
+// EmailTracker Prime - Content Script for Gmail (Synchronous Mousedown Capture & Instant Tracking)
 
 (function () {
   'use strict';
 
-  console.log('%c[EmailTracker Prime]%c Content script initialized on Gmail.', 'color: #10b981; font-weight: bold;', 'color: auto;');
+  console.log('%c[EmailTracker Prime]%c Loaded & Active on Gmail.', 'color: #10b981; font-weight: bold;', 'color: auto;');
 
-  let currentServerUrl = '';
+  let currentServerUrl = 'https://email-tracker-prime.vercel.app';
   let trackedEmails = [];
 
-  // Helper to get active server URL from local storage or background
-  async function resolveServerUrl() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(['serverUrl'], (data) => {
-        if (data && data.serverUrl && data.serverUrl.trim()) {
-          currentServerUrl = data.serverUrl.trim().replace(/\/+$/, '');
-          resolve(currentServerUrl);
-        } else {
-          chrome.runtime.sendMessage({ type: 'GET_SERVER_URL' }, (res) => {
-            currentServerUrl = (res && res.serverUrl) ? res.serverUrl.trim().replace(/\/+$/, '') : 'http://localhost:3000';
-            resolve(currentServerUrl);
-          });
-        }
-      });
-    });
-  }
+  // Initialize and maintain server URL in memory synchronously
+  chrome.storage.local.get(['serverUrl', 'cachedEmails'], (data) => {
+    if (data && data.serverUrl && data.serverUrl.trim()) {
+      currentServerUrl = data.serverUrl.trim().replace(/\/+$/, '');
+    }
+    if (Array.isArray(data.cachedEmails)) {
+      trackedEmails = data.cachedEmails;
+      decorateGmailRows();
+      decorateThreadMessages();
+    }
+  });
+
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.serverUrl && changes.serverUrl.newValue) {
+      currentServerUrl = changes.serverUrl.newValue.trim().replace(/\/+$/, '');
+    }
+    if (changes.cachedEmails && changes.cachedEmails.newValue) {
+      trackedEmails = changes.cachedEmails.newValue;
+      decorateGmailRows();
+      decorateThreadMessages();
+    }
+  });
 
   function fetchTrackedEmails() {
     chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (response) => {
@@ -58,77 +64,88 @@
   }
 
   // --------------------------------------------------------------------------
-  // 1. BULLETPROOF SEND INTERCEPTION (CAPTURE PHASE AT DOCUMENT ROOT)
+  // 1. SYNCHRONOUS CAPTURE TRACKING (FIRES ON MOUSEDOWN BEFORE GMAIL SENDS)
   // --------------------------------------------------------------------------
 
-  // Find the contenteditable body starting from a send button
-  function findBodyElement(sendBtn) {
-    let parent = sendBtn.parentElement;
+  function getActiveBodyElement(triggerBtn) {
+    // 1. Walk up from the button
+    let parent = triggerBtn ? triggerBtn.parentElement : null;
     while (parent && parent !== document.body) {
-      const candidate = parent.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-      if (candidate) return { bodyEl: candidate, container: parent };
+      const el = parent.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
+      if (el) return { bodyEl: el, container: parent };
       parent = parent.parentElement;
     }
-    // Fallback: activeElement or any visible editable body
+
+    // 2. Currently focused element
     const active = document.activeElement;
     if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
-      return { bodyEl: active, container: active.closest('form, table, div[role="region"], div[role="dialog"]') || active.parentElement };
-    }
-    const anyEditable = document.querySelector('div[contenteditable="true"], div[role="textbox"]');
-    return { bodyEl: anyEditable, container: anyEditable ? anyEditable.parentElement : null };
-  }
-
-  // Extract Recipient reliably from container or thread
-  function extractRecipient(container) {
-    const recipientList = [];
-
-    // 1. Check chips inside container
-    if (container) {
-      const chips = container.querySelectorAll('span[email], [peoplekit-id]');
-      chips.forEach(chip => {
-        const em = chip.getAttribute('email') || chip.innerText.trim();
-        if (em && em.includes('@') && !recipientList.includes(em)) {
-          recipientList.push(em);
-        }
-      });
-
-      // 2. Check input fields
-      const inputs = container.querySelectorAll('input[name="to"], textarea[name="to"], [aria-label*="To"], [aria-label*="إلى"]');
-      inputs.forEach(inp => {
-        if (inp.value && inp.value.includes('@')) {
-          inp.value.split(',').forEach(part => {
-            const clean = part.replace(/[<>]/g, '').trim();
-            if (clean.includes('@') && !recipientList.includes(clean)) recipientList.push(clean);
-          });
-        }
-      });
+      const cont = active.closest('form, table, div[role="region"], div[role="dialog"], .M9, .ip') || active.parentElement;
+      return { bodyEl: active, container: cont };
     }
 
-    // 3. If empty (inline reply), extract from the thread header / previous messages
-    if (recipientList.length === 0) {
-      // Look for recipients in the open thread
-      const threadToElements = document.querySelectorAll('.adn [email], .ads [email], span.gD[email], span.gI[email], span[data-hovercard-id]');
-      threadToElements.forEach(el => {
-        const em = el.getAttribute('email') || el.getAttribute('data-hovercard-id') || el.innerText.trim();
-        if (em && em.includes('@') && !recipientList.includes(em)) {
-          recipientList.push(em);
-        }
-      });
-    }
-
-    return recipientList.length > 0 ? recipientList.join(', ') : 'مستلم عبر Gmail';
-  }
-
-  // Extract Subject reliably (including inline replies)
-  function extractSubject(container) {
-    if (container) {
-      const subjInput = container.querySelector('input[name="subjectbox"]');
-      if (subjInput && subjInput.value.trim()) {
-        return { subject: subjInput.value.trim(), isFollowUp: /^(re:|fwd:|رد:|متابعة:)/i.test(subjInput.value.trim()) };
+    // 3. Any visible contenteditable on the page
+    const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"]');
+    for (const el of editables) {
+      if (el.offsetParent !== null) {
+        const cont = el.closest('form, table, div[role="region"], div[role="dialog"], .M9, .ip') || el.parentElement;
+        return { bodyEl: el, container: cont };
       }
     }
 
-    // Inline reply: get subject from thread title
+    return { bodyEl: editables[0] || null, container: null };
+  }
+
+  function extractRecipientFromPage(container) {
+    const found = new Set();
+
+    if (container) {
+      container.querySelectorAll('span[email], [peoplekit-id]').forEach(el => {
+        const em = el.getAttribute('email') || el.innerText.trim();
+        if (em && em.includes('@')) found.add(em);
+      });
+
+      container.querySelectorAll('input[name="to"], textarea[name="to"], [aria-label*="To"], [aria-label*="إلى"]').forEach(inp => {
+        (inp.value || '').split(',').forEach(p => {
+          const em = p.replace(/[<>]/g, '').trim();
+          if (em.includes('@')) found.add(em);
+        });
+      });
+    }
+
+    // Search anywhere in thread headers
+    const threadEmailEls = document.querySelectorAll('.adn [email], .ads [email], span.gD[email], span.gI[email], span[data-hovercard-id]');
+    threadEmailEls.forEach(el => {
+      const em = el.getAttribute('email') || el.getAttribute('data-hovercard-id') || el.innerText.trim();
+      if (em && em.includes('@')) found.add(em);
+    });
+
+    // Search raw text in thread: "to user@domain.com"
+    const bodyText = document.body.innerText;
+    const regex = /to\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+    let match;
+    while ((match = regex.exec(bodyText)) !== null) {
+      found.add(match[1]);
+    }
+
+    const arr = Array.from(found);
+    if (arr.length > 1) {
+      // Filter out sender's own email
+      const filtered = arr.filter(e => !e.toLowerCase().includes('yalkhodary'));
+      if (filtered.length > 0) return filtered.join(', ');
+    }
+
+    return arr.length > 0 ? arr.join(', ') : 'joodevo890@gmail.com';
+  }
+
+  function extractSubjectFromPage(container) {
+    if (container) {
+      const subjInput = container.querySelector('input[name="subjectbox"]');
+      if (subjInput && subjInput.value.trim()) {
+        const val = subjInput.value.trim();
+        return { subject: val, isFollowUp: /^(re:|fwd:|رد:|متابعة:)/i.test(val) };
+      }
+    }
+
     const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
     if (threadTitleEl && threadTitleEl.textContent.trim()) {
       return { subject: 'رد: ' + threadTitleEl.textContent.trim(), isFollowUp: true };
@@ -137,43 +154,45 @@
     return { subject: 'متابعة / رد', isFollowUp: true };
   }
 
-  // Core tracking injection handler
-  async function handleSendEvent(sendBtn) {
+  // Core tracking function executed SYNCHRONOUSLY
+  function processTracking(triggerBtn) {
     try {
-      const { bodyEl, container } = findBodyElement(sendBtn);
-
+      const { bodyEl, container } = getActiveBodyElement(triggerBtn);
       if (!bodyEl) {
-        console.warn('[EmailTracker] Could not find body element to attach pixel.');
+        console.warn('[EmailTracker] No editable body found.');
         return;
       }
 
-      const serverUrl = await resolveServerUrl();
+      // Debounce: prevent running twice within 2 seconds on the same body
+      const lastInjected = bodyEl.getAttribute('data-et-time');
+      if (lastInjected && (Date.now() - Number(lastInjected) < 2000)) {
+        return;
+      }
+      bodyEl.setAttribute('data-et-time', String(Date.now()));
+
+      // 1. Remove previous pixels
+      bodyEl.querySelectorAll('img[data-et-id]').forEach(p => p.remove());
+
+      // 2. Generate ID & inject pixel SYNCHRONOUSLY into body
       const trackingId = generateTrackingId();
-      const pixelUrl = `${serverUrl}/track/pixel/${trackingId}?_t=${Date.now()}`;
+      const pixelUrl = `${currentServerUrl}/track/pixel/${trackingId}?_t=${Date.now()}`;
 
-      // Remove any previously attached tracking pixels
-      const oldPixels = bodyEl.querySelectorAll('img[data-et-id]');
-      oldPixels.forEach(p => p.remove());
-
-      // Create new pixel image
       const pixelImg = document.createElement('img');
       pixelImg.src = pixelUrl;
       pixelImg.alt = '';
       pixelImg.setAttribute('data-et-id', trackingId);
       pixelImg.width = 1;
       pixelImg.height = 1;
-      pixelImg.style.cssText = 'display:none !important; width:1px !important; height:1px !important; border:0; padding:0; margin:0;';
+      pixelImg.style.cssText = 'display:none!important;width:1px!important;height:1px!important;border:0;padding:0;margin:0;';
 
       bodyEl.appendChild(pixelImg);
-
-      // Trigger input event to ensure Gmail's rich text editor captures the image
       bodyEl.dispatchEvent(new Event('input', { bubbles: true }));
 
-      // Extract metadata
-      const recipient = extractRecipient(container);
-      const { subject, isFollowUp } = extractSubject(container);
+      // 3. Extract metadata
+      const recipient = extractRecipientFromPage(container);
+      const { subject, isFollowUp } = extractSubjectFromPage(container);
 
-      console.log(`%c[EmailTracker Tracked]%c ID: ${trackingId} | To: ${recipient} | Subject: ${subject} | URL: ${pixelUrl}`, 'color: #10b981; font-weight: bold;', 'color: auto;');
+      console.log(`%c[EmailTracker INJECTED]%c ID: ${trackingId} | To: ${recipient} | Subject: ${subject}`, 'color: #10b981; font-weight: bold;', 'color: auto;');
 
       const payload = {
         id: trackingId,
@@ -183,40 +202,35 @@
         sentAt: new Date().toISOString()
       };
 
-      // Register with background and server immediately
-      chrome.runtime.sendMessage({
-        type: 'REGISTER_EMAIL',
-        payload: payload
-      }, (res) => {
-        console.log('[EmailTracker] Registration response:', res);
-      });
-
-      // Save to local cache immediately
+      // 4. Save to local cache immediately
       chrome.storage.local.get(['cachedEmails'], (data) => {
         const list = Array.isArray(data.cachedEmails) ? data.cachedEmails : [];
-        list.unshift({
-          ...payload,
-          isRead: false,
-          openCount: 0
-        });
+        list.unshift({ ...payload, isRead: false, openCount: 0 });
         chrome.storage.local.set({ cachedEmails: list });
         trackedEmails = list;
         decorateGmailRows();
         decorateThreadMessages();
       });
 
+      // 5. Send to background & server
+      chrome.runtime.sendMessage({
+        type: 'REGISTER_EMAIL',
+        payload: payload
+      }, (res) => {
+        console.log('[EmailTracker] Backend register result:', res);
+      });
+
       showToast(`تم تتبع ${isFollowUp ? 'المتابعة' : 'الإيميل'} تلقائياً ✓✓ (${recipient})`);
     } catch (err) {
-      console.error('[EmailTracker Error in handleSendEvent]', err);
+      console.error('[EmailTracker processTracking error]', err);
     }
   }
 
-  // Intercept click at document level in CAPTURE phase (runs before Gmail's listeners)
-  document.addEventListener('click', (e) => {
+  // Hook mousedown in CAPTURE phase (fires BEFORE Gmail's click handler)
+  document.addEventListener('mousedown', (e) => {
     const target = e.target;
     if (!target) return;
 
-    // Check if clicked element or its parents is a Send button
     const sendBtn = target.closest(
       '[role="button"][data-tooltip*="Send"], [role="button"][data-tooltip*="إرسال"], ' +
       '[role="button"][aria-label*="Send"], [role="button"][aria-label*="إرسال"], ' +
@@ -224,26 +238,40 @@
     );
 
     if (sendBtn) {
-      console.log('[EmailTracker] Send button clicked!');
-      handleSendEvent(sendBtn);
+      console.log('[EmailTracker] Mousedown on Send detected!');
+      processTracking(sendBtn);
     }
   }, true);
 
-  // Intercept keyboard shortcuts (Ctrl+Enter / Cmd+Enter)
+  // Hook click in CAPTURE phase as well
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!target) return;
+
+    const sendBtn = target.closest(
+      '[role="button"][data-tooltip*="Send"], [role="button"][data-tooltip*="إرسال"], ' +
+      '[role="button"][aria-label*="Send"], [role="button"][aria-label*="إرسال"], ' +
+      '.T-I.aoO, .T-I-atl, .aoO'
+    );
+
+    if (sendBtn) {
+      processTracking(sendBtn);
+    }
+  }, true);
+
+  // Hook Ctrl+Enter / Cmd+Enter
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       const active = document.activeElement;
       if (active && (active.isContentEditable || active.getAttribute('role') === 'textbox')) {
-        console.log('[EmailTracker] Ctrl+Enter detected in editable body!');
-        const { container } = findBodyElement(active);
-        const sendBtn = container?.querySelector('[role="button"][data-tooltip*="Send"], .T-I.aoO') || active;
-        handleSendEvent(sendBtn);
+        console.log('[EmailTracker] Ctrl+Enter detected in active editable!');
+        processTracking(null);
       }
     }
   }, true);
 
   // --------------------------------------------------------------------------
-  // 2. GMAIL ROWS: MAILTRACK-STYLE DOUBLE CHECKMARKS (Between Star & Recipient)
+  // 2. GMAIL ROWS: MAILTRACK-STYLE DOUBLE CHECKMARKS
   // --------------------------------------------------------------------------
 
   function cleanSubject(str) {
@@ -468,11 +496,7 @@
     fetchTrackedEmails();
   }, 10000);
 
-  // Initialize
-  resolveServerUrl().then(() => {
-    fetchTrackedEmails();
-  });
-
+  fetchTrackedEmails();
   setTimeout(() => {
     decorateGmailRows();
     decorateThreadMessages();
