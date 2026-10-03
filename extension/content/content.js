@@ -195,7 +195,13 @@
 
     const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
     if (threadTitleEl && threadTitleEl.textContent.trim()) {
-      return { subject: 'رد: ' + threadTitleEl.textContent.trim(), isFollowUp: true };
+      let subj = threadTitleEl.textContent.split('\n')[0].trim();
+      // Remove any trailing snippet text
+      subj = subj.replace(/\s+-\s+.*$/, '').trim();
+      if (!/^(re:|fwd:|رد:|متابعة:)/i.test(subj)) {
+        subj = 'رد: ' + subj;
+      }
+      return { subject: subj, isFollowUp: true };
     }
 
     return { subject: 'متابعة / رد', isFollowUp: true };
@@ -217,8 +223,13 @@
       }
       bodyEl.setAttribute('data-et-time', String(Date.now()));
 
-      // 1. Remove previous pixels
-      bodyEl.querySelectorAll('img[data-et-id]').forEach(p => p.remove());
+      // 1. Thoroughly remove ALL previous tracking pixels (including any in quoted thread history from earlier replies)
+      const oldPixels = bodyEl.querySelectorAll(
+        'img[data-et-id], img[src*="/track/pixel/"], img[src*="/pixel/"], img[src*="email-tracker-prime"]'
+      );
+      oldPixels.forEach(p => {
+        try { p.remove(); } catch(e) {}
+      });
 
       // 2. Generate ID & inject pixel SYNCHRONOUSLY into body
       const trackingId = generateTrackingId();
@@ -330,12 +341,7 @@
       .toLowerCase();
   }
 
-  function createMailtrackBadge(matched) {
-    const badge = document.createElement('span');
-    badge.className = `et-mailtrack-checks ${matched.isRead ? 'et-is-read' : 'et-is-pending'}`;
-    badge.dataset.emailId = matched.id;
-    badge.dataset.isRead = String(matched.isRead);
-
+  function updateBadgeTooltip(badge, matched) {
     const dateStr = matched.firstReadAt 
       ? formatTimeWithTz(matched.firstReadAt) 
       : (matched.firstReadAtFormatted ? matched.firstReadAtFormatted.formatted : null);
@@ -345,8 +351,16 @@
       : (matched.sentAtFormatted ? matched.sentAtFormatted.formatted : '');
 
     badge.title = matched.isRead 
-      ? `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matched.openCount} مرة\n(انقر لعرض التفاصيل)` 
-      : `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${sentStr}`;
+      ? `EmailTracker Prime: تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matched.openCount} مرة\n(انقر لعرض التفاصيل)` 
+      : `EmailTracker Prime: تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${sentStr}`;
+  }
+
+  function createMailtrackBadge(matched) {
+    const badge = document.createElement('span');
+    badge.className = `et-mailtrack-checks ${matched.isRead ? 'et-is-read' : 'et-is-pending'}`;
+    badge.dataset.emailId = matched.id;
+    badge.dataset.isRead = String(matched.isRead);
+    updateBadgeTooltip(badge, matched);
 
     badge.innerHTML = `
       <svg class="et-svg-icon" viewBox="0 0 16 11" width="16" height="11" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -364,52 +378,95 @@
     return badge;
   }
 
+  let isDecorating = false;
+
   function decorateGmailRows() {
-    if (!trackedEmails || trackedEmails.length === 0) return;
+    if (isDecorating || !trackedEmails || trackedEmails.length === 0) return;
+    isDecorating = true;
 
-    const rows = document.querySelectorAll('tr.zA, tr[role="row"]');
+    try {
+      const rows = document.querySelectorAll('tr.zA, tr[role="row"]');
+      if (!rows || rows.length === 0) return;
 
-    rows.forEach((row) => {
-      const subjectSpan = row.querySelector('.y6 span.bog, .bqe, .bog, span[data-thread-id]');
-      const recipCell = row.querySelector('.yW, .yX.xY, td.yX');
+      const usedEmailIds = new Set();
 
-      const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
-      const rowRecipText = (recipCell ? recipCell.textContent : '').toLowerCase().trim();
+      rows.forEach((row) => {
+        const subjectSpan = row.querySelector('.y6 span.bog, .bqe, .bog, span[data-thread-id]');
+        const recipCell = row.querySelector('.yW, .yX.xY, td.yX');
 
-      let matchedEmail = null;
+        const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
+        const rowRecipText = (recipCell ? recipCell.textContent : '').toLowerCase().trim();
 
-      for (const item of trackedEmails) {
-        const itemSubject = cleanSubject(item.subject);
-        const itemRecip = (item.recipient || '').toLowerCase().trim();
-        const recipUser = itemRecip.split('@')[0];
+        let matchedEmail = null;
 
-        if (itemSubject && rowSubject && (rowSubject === itemSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject))) {
-          matchedEmail = item;
-          break;
+        // Pass 1: Strict match (Subject + Recipient) on unused tracked emails
+        for (const item of trackedEmails) {
+          if (usedEmailIds.has(item.id)) continue;
+          const itemSubject = cleanSubject(item.subject);
+          const itemRecip = (item.recipient || '').toLowerCase().trim();
+          const recipUser = itemRecip.split('@')[0];
+
+          const subjMatch = itemSubject && rowSubject && (
+            rowSubject === itemSubject || 
+            rowSubject.includes(itemSubject) || 
+            itemSubject.includes(rowSubject)
+          );
+          const recipMatch = recipUser && rowRecipText && (
+            rowRecipText.includes(recipUser) || 
+            rowRecipText.includes(itemRecip)
+          );
+
+          if (subjMatch && recipMatch) {
+            matchedEmail = item;
+            break;
+          }
         }
 
-        if (recipUser && rowRecipText && (rowRecipText.includes(recipUser) || rowRecipText.includes(itemRecip))) {
-          matchedEmail = item;
-          break;
+        // Pass 2: Subject-only match on unused tracked emails
+        if (!matchedEmail) {
+          for (const item of trackedEmails) {
+            if (usedEmailIds.has(item.id)) continue;
+            const itemSubject = cleanSubject(item.subject);
+            if (itemSubject && rowSubject && (rowSubject === itemSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject))) {
+              matchedEmail = item;
+              break;
+            }
+          }
         }
-      }
 
-      if (!matchedEmail) return;
+        const existing = row.querySelector('.et-mailtrack-checks');
 
-      const targetContainer = row.querySelector('.yW') || row.querySelector('.yX.xY') || recipCell;
-      if (!targetContainer) return;
-
-      let existing = targetContainer.querySelector('.et-mailtrack-checks');
-      if (existing) {
-        if (existing.dataset.emailId === matchedEmail.id && existing.dataset.isRead === String(matchedEmail.isRead)) {
+        if (!matchedEmail) {
+          if (existing) existing.remove();
           return;
         }
-        existing.remove();
-      }
 
-      const badge = createMailtrackBadge(matchedEmail);
-      targetContainer.prepend(badge);
-    });
+        usedEmailIds.add(matchedEmail.id);
+
+        const targetContainer = row.querySelector('.yW') || row.querySelector('.yX.xY') || recipCell;
+        if (!targetContainer) return;
+
+        if (existing) {
+          // If badge already exists for this exact email, update status smoothly without removing DOM element
+          if (existing.dataset.emailId === matchedEmail.id) {
+            const isReadStr = String(matchedEmail.isRead);
+            if (existing.dataset.isRead !== isReadStr) {
+              existing.dataset.isRead = isReadStr;
+              existing.className = `et-mailtrack-checks ${matchedEmail.isRead ? 'et-is-read' : 'et-is-pending'}`;
+              updateBadgeTooltip(existing, matchedEmail);
+            }
+            return;
+          } else {
+            existing.remove();
+          }
+        }
+
+        const badge = createMailtrackBadge(matchedEmail);
+        targetContainer.prepend(badge);
+      });
+    } finally {
+      isDecorating = false;
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -555,13 +612,24 @@
   // --------------------------------------------------------------------------
 
   let debounceTimeout = null;
-  const observer = new MutationObserver(() => {
+  const observer = new MutationObserver((mutations) => {
+    // Prevent recursion: Ignore mutations directly originating from our badges, tooltips, or modals
+    const isSelfMutation = mutations.every(m => {
+      const t = m.target;
+      return t && (
+        (t.classList && (t.classList.contains('et-mailtrack-checks') || t.classList.contains('et-svg-icon') || t.classList.contains('et-toast') || t.classList.contains('et-modal-overlay'))) ||
+        (t.closest && t.closest('.et-mailtrack-checks, .et-modal-overlay, .et-toast'))
+      );
+    });
+
+    if (isSelfMutation) return;
+
     if (debounceTimeout) clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
       neutralizeSelfPixels();
       decorateGmailRows();
       decorateThreadMessages();
-    }, 250);
+    }, 300);
   });
 
   observer.observe(document.body, { childList: true, subtree: true });

@@ -236,39 +236,27 @@ const db = {
     const clientType = parseUserAgent(userAgent);
 
     if (!target) {
-      target = {
-        id,
-        recipient: 'مستلم غير محدد',
-        subject: 'إيميل مسجل تلقائياً',
-        sentAt: now,
-        sentAtFormatted: formatted,
-        isRead: true,
-        openCount: 1,
-        firstReadAt: now,
-        firstReadAtFormatted: formatted,
-        lastReadAt: now,
-        lastReadAtFormatted: formatted,
-        reads: []
-      };
-    } else {
-      // Ignore hits within 4 seconds of creation (Sender compose / send self-render)
-      if (target.sentAt) {
-        const diffMs = new Date(now).getTime() - new Date(target.sentAt).getTime();
-        if (diffMs < 4000) {
-          console.log(`[Self-Open Ignored] Hit occurred only ${Math.round(diffMs / 1000)}s after sending (Sender compose/send self-render).`);
-          return target;
-        }
-      }
-
-      target.openCount = (target.openCount || 0) + 1;
-      target.isRead = true;
-      if (!target.firstReadAt) {
-        target.firstReadAt = now;
-        target.firstReadAtFormatted = formatted;
-      }
-      target.lastReadAt = now;
-      target.lastReadAtFormatted = formatted;
+      console.log(`[Pixel Hit Ignored] ID ${id} not found in database.`);
+      return null;
     }
+
+    // Ignore hits within 4 seconds of creation (Sender compose / send self-render)
+    if (target.sentAt) {
+      const diffMs = new Date(now).getTime() - new Date(target.sentAt).getTime();
+      if (diffMs < 4000) {
+        console.log(`[Self-Open Ignored] Hit occurred only ${Math.round(diffMs / 1000)}s after sending (Sender compose/send self-render).`);
+        return target;
+      }
+    }
+
+    target.openCount = (target.openCount || 0) + 1;
+    target.isRead = true;
+    if (!target.firstReadAt) {
+      target.firstReadAt = now;
+      target.firstReadAtFormatted = formatted;
+    }
+    target.lastReadAt = now;
+    target.lastReadAtFormatted = formatted;
 
     if (!Array.isArray(target.reads)) target.reads = [];
 
@@ -323,6 +311,11 @@ const db = {
           for (const key in all) {
             try {
               let val = typeof all[key] === 'string' ? JSON.parse(all[key]) : all[key];
+              // Auto-purge ghost emails permanently
+              if (!val || val.recipient === 'مستلم غير محدد' || val.subject === 'إيميل مسجل تلقائياً') {
+                redis.hdel(REDIS_KEY, key).catch(() => {});
+                continue;
+              }
               const prevRead = val.isRead;
               val = cleanBotReads(val);
               if (prevRead !== val.isRead) {
@@ -338,21 +331,26 @@ const db = {
         console.error('[Redis getAllEmails Error]', err);
       }
     }
-    return Object.values(emailsCache).map(cleanBotReads).sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    return Object.values(emailsCache)
+      .filter(e => e.recipient !== 'مستلم غير محدد' && e.subject !== 'إيميل مسجل تلقائياً')
+      .map(cleanBotReads)
+      .sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
   },
 
   async deleteEmail(id) {
+    let deleted = false;
     if (redis) {
       try {
-        await redis.hdel(REDIS_KEY, id);
+        const count = await redis.hdel(REDIS_KEY, id);
+        if (count > 0) deleted = true;
       } catch (e) {}
     }
     if (emailsCache[id]) {
       delete emailsCache[id];
       if (!redis) saveLocalDatabase();
-      return true;
+      deleted = true;
     }
-    return false;
+    return deleted;
   },
 
   async clearAllEmails() {

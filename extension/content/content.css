@@ -6,15 +6,19 @@
   align-items: center;
   justify-content: center;
   vertical-align: middle;
-  margin-right: 8px;
-  margin-left: 4px;
+  margin-right: 6px;
+  margin-left: 2px;
+  padding: 2px 3px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, background 0.15s ease;
   user-select: none;
+  background: transparent;
 }
 
 .et-mailtrack-checks:hover {
-  transform: scale(1.25);
+  transform: scale(1.15);
+  background: rgba(16, 185, 129, 0.12);
 }
 
 .et-svg-icon {
