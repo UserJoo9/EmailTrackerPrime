@@ -553,12 +553,20 @@
       const usedEmailIds = new Set();
 
       rows.forEach((row) => {
+        // Deduplicate: ensure at most ONE badge ever exists in this row
+        const existingBadges = row.querySelectorAll('.et-mailtrack-checks');
+        if (existingBadges.length > 1) {
+          for (let i = 1; i < existingBadges.length; i++) {
+            existingBadges[i].remove();
+          }
+        }
+
         const subjectSpan = row.querySelector('.y6 span.bog, .bqe, .bog, span[data-thread-id]');
         const recipCell = row.querySelector('.yW, .yX.xY, td.yX');
 
         const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
 
-        const existing = row.querySelector('.et-mailtrack-checks');
+        const existing = existingBadges[0] || null;
         let matchedEmail = null;
 
         // 1. Sticky matching: If this row already has our badge, stick with that exact email ID if it still matches!
@@ -627,7 +635,7 @@
   }
 
   // --------------------------------------------------------------------------
-  // 3. IN-THREAD MESSAGE HEADERS
+  // 3. IN-THREAD MESSAGE HEADERS (STRICT SINGLE BADGE ON SENT MESSAGES ONLY)
   // --------------------------------------------------------------------------
 
   function decorateThreadMessages() {
@@ -636,20 +644,73 @@
     const threadTitleEl = document.querySelector('h2.hP, h2[data-thread-perm-id], .ha h2');
     if (!threadTitleEl) return;
     const threadSubject = cleanSubject(threadTitleEl.textContent);
+    const myEmail = getMyEmail();
 
-    const messageHeaders = document.querySelectorAll('.gE.iv.gt, .adn.ads .gH');
+    // Query each individual message card in the thread
+    const messageCards = document.querySelectorAll('.adn.ads');
+    if (!messageCards || messageCards.length === 0) return;
 
-    messageHeaders.forEach((header) => {
-      if (header.querySelector('.et-thread-checks')) return;
+    messageCards.forEach((card) => {
+      // 1. Remove duplicate badges inside this message card if any exist
+      const existingBadges = card.querySelectorAll('.et-thread-checks');
+      if (existingBadges.length > 1) {
+        for (let i = 1; i < existingBadges.length; i++) {
+          existingBadges[i].remove();
+        }
+      }
 
+      // 2. Only show read receipts on messages SENT BY ME (the sender), never on incoming/received messages!
+      const senderEl = card.querySelector('.gD[email], span[email]');
+      if (senderEl) {
+        const senderEmail = (senderEl.getAttribute('email') || '').trim().toLowerCase();
+        if (senderEmail && senderEmail !== myEmail && !senderEmail.includes(myEmail)) {
+          if (existingBadges[0]) existingBadges[0].remove();
+          return;
+        }
+      }
+
+      // 3. Match against tracked emails
+      const cardRecipEl = card.querySelector('.hb [email], .hb [data-hovercard-id], span.g2');
       const matchedEmail = trackedEmails.find((item) => {
         const itemSubject = cleanSubject(item.subject);
-        return itemSubject && (itemSubject === threadSubject || threadSubject.includes(itemSubject) || itemSubject.includes(threadSubject));
+        const subjMatch = itemSubject && (itemSubject === threadSubject || threadSubject.includes(itemSubject) || itemSubject.includes(threadSubject));
+        if (!subjMatch) return false;
+        if (cardRecipEl && item.recipient) {
+          return matchRecipient(cardRecipEl, item.recipient);
+        }
+        return true;
       });
 
-      if (!matchedEmail) return;
+      if (!matchedEmail) {
+        if (existingBadges[0]) existingBadges[0].remove();
+        return;
+      }
 
-      const dateContainer = header.querySelector('.gK, .gH span.g3, .xW') || header;
+      // 4. In-place update if badge already exists
+      if (existingBadges.length > 0) {
+        const existing = existingBadges[0];
+        if (existing.dataset.emailId === matchedEmail.id) {
+          const isReadStr = String(matchedEmail.isRead);
+          if (existing.dataset.isRead !== isReadStr) {
+            existing.dataset.isRead = isReadStr;
+            existing.className = `et-mailtrack-checks et-thread-checks ${matchedEmail.isRead ? 'et-is-read' : 'et-is-pending'}`;
+            updateBadgeTooltip(existing, matchedEmail);
+          }
+          return;
+        } else {
+          existing.remove();
+        }
+      }
+
+      // 5. Insert exactly ONE badge into the date container in the message header
+      const header = card.querySelector('.gH');
+      if (!header) return;
+
+      const dateContainer = header.querySelector('.gK') || header.querySelector('.xW') || header.querySelector('.g3');
+      if (!dateContainer) return;
+
+      // Safety check: ensure dateContainer does not already contain a badge
+      if (dateContainer.querySelector('.et-thread-checks')) return;
 
       const badge = createMailtrackBadge(matchedEmail);
       badge.classList.add('et-thread-checks');
