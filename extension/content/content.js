@@ -158,7 +158,7 @@
       }
     }
 
-    // 1. Check direct attributes in compose container
+    // 1. Direct recipient inputs and chips inside the compose box
     searchScope.querySelectorAll('[email]').forEach(el => {
       addEmail(el.getAttribute('email'));
     });
@@ -177,20 +177,22 @@
       addEmail(chip.innerText || chip.textContent);
     });
 
-    // 2. Inline reply: check previous message sender in thread
+    // 2. In inline reply: scan thread sender headers on the page
     if (recipients.size === 0) {
-      const parentMsg = searchScope.closest('.adn, .ads, [role="listitem"]');
-      if (parentMsg) {
-        parentMsg.querySelectorAll('.gD[email], span[email]').forEach(el => {
-          addEmail(el.getAttribute('email'));
-        });
-      }
+      const senders = document.querySelectorAll('.gD[email], span[email]');
+      senders.forEach(el => {
+        addEmail(el.getAttribute('email'));
+      });
     }
 
-    // 3. Global active compose search
+    // 3. Fallback: check contact display name in reply header (e.g. "To: Whacka")
     if (recipients.size === 0) {
-      document.querySelectorAll('.AD [email], .M9 [email], div[role="dialog"] [email], .AD input.vO, .M9 input.vO').forEach(el => {
-        addEmail(el.getAttribute('email') || el.value);
+      const headerChips = document.querySelectorAll('.aoT, .vN, .vR');
+      headerChips.forEach(chip => {
+        const text = (chip.innerText || chip.textContent || '').replace(/^to:?\s*/i, '').trim();
+        if (text && text.length > 1 && !text.toLowerCase().includes('yalkhodary')) {
+          recipients.add(text);
+        }
       });
     }
 
@@ -394,6 +396,48 @@
     return badge;
   }
 
+  function matchRecipient(recipCell, itemRecipient) {
+    if (!recipCell || !itemRecipient) return false;
+
+    const item = itemRecipient.toLowerCase().trim();
+    const cellText = (recipCell.textContent || '').toLowerCase().trim();
+
+    // 1. Direct match on row element attributes
+    const cellEmails = [];
+    recipCell.querySelectorAll('[email], [data-hovercard-id], span[title]').forEach(el => {
+      const em = el.getAttribute('email') || el.getAttribute('data-hovercard-id') || el.getAttribute('title');
+      if (em) cellEmails.push(em.toLowerCase().trim());
+    });
+
+    for (const em of cellEmails) {
+      if (em === item || item.includes(em) || em.includes(item)) return true;
+      const u1 = em.split('@')[0];
+      const u2 = item.split('@')[0];
+      if (u1 && u2 && u1 === u2) return true;
+    }
+
+    // 2. Direct match with full email
+    if (cellText.includes(item)) return true;
+
+    // 3. Username match (e.g. "joodevo891" or "joodevo890")
+    const recipUser = item.split('@')[0].trim();
+    if (recipUser && recipUser.length >= 3 && cellText.includes(recipUser)) return true;
+
+    // 4. Domain match (e.g. "whacka" for whacka.app)
+    if (item.includes('@')) {
+      const domain = item.split('@')[1].split('.')[0].toLowerCase();
+      if (domain && domain.length >= 4 && !['gmail', 'yahoo', 'hotmail', 'outlook', 'icloud'].includes(domain)) {
+        if (cellText.includes(domain)) return true;
+      }
+    }
+
+    // 5. Contact display name match (e.g. "Whacka")
+    const displayName = item.split('<')[0].replace(/[^a-z0-9]/gi, ' ').trim();
+    if (displayName && displayName.length >= 3 && cellText.includes(displayName)) return true;
+
+    return false;
+  }
+
   let isDecorating = false;
 
   function decorateGmailRows() {
@@ -411,7 +455,6 @@
         const recipCell = row.querySelector('.yW, .yX.xY, td.yX');
 
         const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
-        const rowRecipText = (recipCell ? recipCell.textContent : '').toLowerCase().trim();
 
         const existing = row.querySelector('.et-mailtrack-checks');
         let matchedEmail = null;
@@ -421,12 +464,7 @@
           const currentId = existing.dataset.emailId;
           const found = trackedEmails.find(e => e.id === currentId);
           if (found && !usedEmailIds.has(currentId)) {
-            const itemRecip = (found.recipient || '').toLowerCase().trim();
-            const recipUser = itemRecip.split('@')[0];
-            const recipMatch = recipUser && rowRecipText && (
-              rowRecipText.includes(recipUser) || rowRecipText.includes(itemRecip)
-            );
-            if (recipMatch) {
+            if (matchRecipient(recipCell, found.recipient)) {
               matchedEmail = found;
             }
           }
@@ -436,18 +474,11 @@
         if (!matchedEmail) {
           for (const item of trackedEmails) {
             if (usedEmailIds.has(item.id)) continue;
+
+            // Recipient check
+            if (!matchRecipient(recipCell, item.recipient)) continue;
+
             const itemSubject = cleanSubject(item.subject);
-            const itemRecip = (item.recipient || '').toLowerCase().trim();
-            const recipUser = itemRecip.split('@')[0];
-
-            // STRICT: Must match recipient!
-            const recipMatch = recipUser && rowRecipText && (
-              rowRecipText.includes(recipUser) || 
-              rowRecipText.includes(itemRecip)
-            );
-
-            if (!recipMatch) continue;
-
             const subjMatch = itemSubject && rowSubject && (
               rowSubject === itemSubject || 
               rowSubject.includes(itemSubject) || 
