@@ -1,9 +1,11 @@
-// EmailTracker Prime - Popup Controller
+// EmailTracker Prime - Popup Controller (with Dark Mode & Custom Timezone Support)
 
 document.addEventListener('DOMContentLoaded', () => {
   let allEmails = [];
   let currentFilter = 'all';
   let searchQuery = '';
+  let selectedTimezone = 'auto';
+  let currentTheme = 'dark';
 
   const statusPill = document.getElementById('connection-status');
   const statusText = statusPill.querySelector('.status-text');
@@ -20,13 +22,98 @@ document.addEventListener('DOMContentLoaded', () => {
   const statRate = document.getElementById('stat-open-rate');
 
   const serverUrlInput = document.getElementById('setting-server-url');
+  const timezoneSelect = document.getElementById('setting-timezone');
+  const themeSelect = document.getElementById('setting-theme');
+  const themeToggleBtn = document.getElementById('theme-toggle-btn');
   const btnTestServer = document.getElementById('btn-test-server');
   const btnSaveSettings = document.getElementById('btn-save-settings');
   const btnSyncNow = document.getElementById('btn-sync-now');
+  const btnClearAll = document.getElementById('btn-clear-all');
   const settingsMsg = document.getElementById('settings-status-msg');
   const openWebDashboard = document.getElementById('open-web-dashboard');
 
-  // Navigation Tabs
+  // -------------------------------------------------------------
+  // 1. THEME HANDLING (DARK MODE)
+  // -------------------------------------------------------------
+
+  function applyTheme(theme) {
+    currentTheme = theme;
+    let isDark = false;
+
+    if (theme === 'dark') {
+      isDark = true;
+    } else if (theme === 'light') {
+      isDark = false;
+    } else {
+      // Auto system
+      isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    if (isDark) {
+      document.body.classList.add('dark-theme');
+      if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
+    } else {
+      document.body.classList.remove('dark-theme');
+      if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
+    }
+
+    if (themeSelect) themeSelect.value = theme;
+  }
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      const newTheme = document.body.classList.contains('dark-theme') ? 'light' : 'dark';
+      applyTheme(newTheme);
+      chrome.storage.local.set({ theme: newTheme });
+    });
+  }
+
+  if (themeSelect) {
+    themeSelect.addEventListener('change', (e) => {
+      applyTheme(e.target.value);
+      chrome.storage.local.set({ theme: e.target.value });
+    });
+  }
+
+  // -------------------------------------------------------------
+  // 2. TIMEZONE FORMATTING
+  // -------------------------------------------------------------
+
+  function formatTimestampInTz(isoString) {
+    if (!isoString) return '';
+    try {
+      const date = new Date(isoString);
+      const tz = selectedTimezone === 'auto' 
+        ? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Cairo') 
+        : selectedTimezone;
+
+      return date.toLocaleString('ar-EG', {
+        timeZone: tz,
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (err) {
+      return new Date(isoString).toLocaleString('ar-EG');
+    }
+  }
+
+  if (timezoneSelect) {
+    timezoneSelect.addEventListener('change', (e) => {
+      selectedTimezone = e.target.value;
+      chrome.storage.local.set({ timezone: selectedTimezone });
+      renderEmails();
+    });
+  }
+
+  // -------------------------------------------------------------
+  // 3. NAVIGATION TABS
+  // -------------------------------------------------------------
+
   navTabs.forEach(tab => {
     tab.addEventListener('click', () => {
       navTabs.forEach(t => t.classList.remove('active'));
@@ -57,7 +144,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEmails();
   });
 
-  // Check Server Health & Auto Sync
+  // -------------------------------------------------------------
+  // 4. SERVER HEALTH & AUTO SYNC
+  // -------------------------------------------------------------
+
   function checkServerHealth() {
     chrome.runtime.sendMessage({ type: 'CHECK_SERVER' }, (res) => {
       if (res && res.reachable) {
@@ -71,7 +161,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Sync cached local emails to server
   function syncEmailsToServer() {
     chrome.storage.local.get(['cachedEmails', 'serverUrl'], (data) => {
       if (Array.isArray(data.cachedEmails) && data.cachedEmails.length > 0 && data.serverUrl) {
@@ -81,7 +170,6 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify({ emails: data.cachedEmails })
         }).then(r => r.json()).then(res => {
           if (res && res.success) {
-            console.log('[EmailTracker] Synced emails with server.');
             loadEmails();
           }
         }).catch(() => {});
@@ -89,7 +177,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Load Emails
+  // -------------------------------------------------------------
+  // 5. LOAD & RENDER EMAILS
+  // -------------------------------------------------------------
+
   function loadEmails() {
     chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (res) => {
       if (res && res.success && Array.isArray(res.emails)) {
@@ -98,7 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderEmails();
         loadStats();
       } else {
-        // Fallback to local cache
         chrome.storage.local.get(['cachedEmails'], (data) => {
           if (Array.isArray(data.cachedEmails)) {
             allEmails = data.cachedEmails;
@@ -109,7 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Render List
   function renderEmails() {
     let filtered = allEmails.filter(email => {
       if (currentFilter === 'read' && !email.isRead) return false;
@@ -135,8 +224,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     emailsList.innerHTML = filtered.map(email => {
       const isRead = email.isRead;
-      const sentStr = email.sentAtFormatted ? email.sentAtFormatted.formatted : new Date(email.sentAt).toLocaleString('ar-EG');
-      const openStr = email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.firstReadAt ? new Date(email.firstReadAt).toLocaleString('ar-EG') : null);
+      const sentStr = formatTimestampInTz(email.sentAt);
+      const openStr = email.firstReadAt ? formatTimestampInTz(email.firstReadAt) : null;
 
       return `
         <div class="email-card ${isRead ? 'is-read' : 'is-unread'}">
@@ -168,7 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="meta-count">${email.openCount} مرة</span>
               </div>
             ` : `
-              <div class="meta-row" style="color: #94a3b8;">
+              <div class="meta-row" style="color: var(--text-muted);">
                 <span>الحالة:</span>
                 <span>لم يُفتح بعد</span>
               </div>
@@ -179,7 +268,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  // Load Stats
+  // -------------------------------------------------------------
+  // 6. LOAD STATS
+  // -------------------------------------------------------------
+
   function loadStats() {
     chrome.runtime.sendMessage({ type: 'GET_STATS' }, (res) => {
       if (res && res.success && res.stats) {
@@ -199,12 +291,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Settings
-  chrome.storage.local.get(['serverUrl'], (data) => {
+  // -------------------------------------------------------------
+  // 7. SETTINGS & ACTIONS
+  // -------------------------------------------------------------
+
+  chrome.storage.local.get(['serverUrl', 'timezone', 'theme'], (data) => {
     if (data.serverUrl) {
       serverUrlInput.value = data.serverUrl;
       if (openWebDashboard) openWebDashboard.href = data.serverUrl;
     }
+    if (data.timezone) {
+      selectedTimezone = data.timezone;
+      if (timezoneSelect) timezoneSelect.value = data.timezone;
+    }
+    applyTheme(data.theme || 'dark'); // Default to sleek dark mode
   });
 
   btnTestServer.addEventListener('click', () => {
@@ -233,12 +333,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnSaveSettings.addEventListener('click', () => {
     const url = serverUrlInput.value.trim().replace(/\/+$/, '');
-    chrome.storage.local.set({ serverUrl: url }, () => {
+    const tz = timezoneSelect.value;
+    const th = themeSelect.value;
+
+    selectedTimezone = tz;
+    applyTheme(th);
+
+    chrome.storage.local.set({
+      serverUrl: url,
+      timezone: tz,
+      theme: th
+    }, () => {
       settingsMsg.className = 'settings-msg success';
       settingsMsg.textContent = 'تم حفظ الإعدادات بنجاح!';
       if (openWebDashboard) openWebDashboard.href = url;
       checkServerHealth();
-      syncEmailsToServer();
+      renderEmails();
       setTimeout(() => { settingsMsg.textContent = ''; }, 2500);
     });
   });
@@ -256,7 +366,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const btnClearAll = document.getElementById('btn-clear-all');
   if (btnClearAll) {
     btnClearAll.addEventListener('click', () => {
       if (confirm('هل تريد مسح جميع الإيميلات المسجلة والبدء من جديد؟')) {

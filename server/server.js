@@ -580,10 +580,10 @@ app.get('/', async (req, res) => {
                       </td>
                       <td style="font-weight: 700; color: #f1f5f9;">${e.recipient}</td>
                       <td style="color: #cbd5e1; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${e.subject || '(بدون عنوان)'}</td>
-                      <td class="time-badge">${e.sentAtFormatted ? e.sentAtFormatted.formatted : new Date(e.sentAt).toLocaleString('ar-EG')}</td>
+                      <td class="time-badge local-tz" data-iso="${e.sentAt}">${e.sentAtFormatted ? e.sentAtFormatted.formatted : new Date(e.sentAt).toLocaleString('ar-EG')}</td>
                       <td>
                         ${e.isRead ? `
-                          <span class="highlight-time">${e.firstReadAtFormatted ? e.firstReadAtFormatted.formatted : new Date(e.firstReadAt).toLocaleString('ar-EG')}</span>
+                          <span class="highlight-time local-tz" data-iso="${e.firstReadAt}">${e.firstReadAtFormatted ? e.firstReadAtFormatted.formatted : new Date(e.firstReadAt).toLocaleString('ar-EG')}</span>
                         ` : '<span style="color: var(--text-dim);">-</span>'}
                       </td>
                       <td>
@@ -598,6 +598,26 @@ app.get('/', async (req, res) => {
             </div>
           </div>
         </div>
+
+        <script>
+          // Automatic local timezone formatting on client side
+          document.querySelectorAll('.local-tz').forEach(el => {
+            const iso = el.getAttribute('data-iso');
+            if (iso) {
+              try {
+                el.textContent = new Date(iso).toLocaleString('ar-EG', {
+                  weekday: 'short',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: true
+                });
+              } catch(e) {}
+            }
+          });
+        </script>
       </body>
       </html>
     `);

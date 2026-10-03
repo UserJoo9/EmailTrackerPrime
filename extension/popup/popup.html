@@ -18,9 +18,12 @@
           <span>تتبع تلقائي ذكي</span>
         </div>
       </div>
-      <div id="connection-status" class="status-pill status-connecting" title="حالة الاتصال">
-        <span class="status-dot"></span>
-        <span class="status-text">جاري الاتصال</span>
+      <div class="header-right">
+        <button id="theme-toggle-btn" class="theme-toggle-btn" title="تبديل الوضع الليلي / النهاري">🌙</button>
+        <div id="connection-status" class="status-pill status-connecting" title="حالة الاتصال">
+          <span class="status-dot"></span>
+          <span class="status-text">جاري الاتصال</span>
+        </div>
       </div>
     </header>
 
@@ -86,7 +89,7 @@
 
         <div class="tip-card">
           <h4>⚡ التتبع التلقائي يعمل الآن:</h4>
-          <p>أي إيميل ترسله من بريدك في Gmail يتم تتبعه لحظياً بشكل مخفي تماماً وبدون أي أزرار أو توقيعات دعائية مزعجة.</p>
+          <p>أي إيميل أو رد ترسله من بريدك في Gmail يتم تتبعه لحظياً بشكل مخفي تماماً وبدون أي أزرار أو توقيعات دعائية مزعجة.</p>
         </div>
       </section>
 
@@ -94,12 +97,39 @@
       <section id="tab-settings" class="tab-pane">
         <div class="settings-form">
           <div class="form-group">
+            <label for="setting-timezone">المنطقة الزمنية (Timezone):</label>
+            <select id="setting-timezone" class="form-select">
+              <option value="auto">تلقائي (توقيت جهازي الحالي)</option>
+              <option value="Africa/Cairo">مصر - القاهرة (UTC+2 / UTC+3)</option>
+              <option value="Asia/Riyadh">السعودية - مكة المكرمة / الرياض (UTC+3)</option>
+              <option value="Asia/Dubai">الإمارات - دبي (UTC+4)</option>
+              <option value="Asia/Kuwait">الكويت (UTC+3)</option>
+              <option value="Asia/Amman">الأردن - عمّان (UTC+3)</option>
+              <option value="Asia/Beirut">لبنان - بيروت (UTC+3)</option>
+              <option value="Africa/Casablanca">المغرب - الدار البيضاء (UTC+1)</option>
+              <option value="Europe/London">بريطانيا - لندن (UTC+0 / UTC+1)</option>
+              <option value="America/New_York">أمريكا - نيويورك (EST/EDT)</option>
+              <option value="UTC">التوقيت العالمي (UTC)</option>
+            </select>
+            <small class="hint">يتم تنسيق وعرض توقيت الإرسال والفتح بدقة وفقاً لتوقيتك المحلي بدلاً من توقيت السيرفر.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="setting-theme">مظهر الإضافة (Theme):</label>
+            <select id="setting-theme" class="form-select">
+              <option value="dark">الوضع الليلي (Dark Mode) 🌙</option>
+              <option value="light">الوضع النهاري (Light Mode) ☀️</option>
+              <option value="auto">تلقائي حسب نظام التشغيل 💻</option>
+            </select>
+          </div>
+
+          <div class="form-group">
             <label for="setting-server-url">رابط السيرفر (Vercel Server URL):</label>
             <div class="input-action">
               <input type="url" id="setting-server-url" placeholder="https://your-tracker.vercel.app">
               <button id="btn-test-server" class="btn-sub">فحص</button>
             </div>
-            <small class="hint">ضع رابط Vercel الخاص بك هنا ليعمل التتبع السحابي 24/7.</small>
+            <small class="hint">رابط خادم Vercel الذي يعمل عليه التتبع 24/7.</small>
           </div>
 
           <button id="btn-sync-now" class="btn-sub" style="width: 100%; margin-top: 4px;">🔄 مزامنة البيانات مع السيرفر الآن</button>

@@ -7,11 +7,15 @@
 
   let currentServerUrl = 'https://email-tracker-prime.vercel.app';
   let trackedEmails = [];
+  let selectedTimezone = 'auto';
 
-  // Initialize and maintain server URL in memory synchronously
-  chrome.storage.local.get(['serverUrl', 'cachedEmails'], (data) => {
+  // Initialize and maintain server URL & timezone in memory synchronously
+  chrome.storage.local.get(['serverUrl', 'cachedEmails', 'timezone'], (data) => {
     if (data && data.serverUrl && data.serverUrl.trim()) {
       currentServerUrl = data.serverUrl.trim().replace(/\/+$/, '');
+    }
+    if (data && data.timezone) {
+      selectedTimezone = data.timezone;
     }
     if (Array.isArray(data.cachedEmails)) {
       trackedEmails = data.cachedEmails;
@@ -24,12 +28,40 @@
     if (changes.serverUrl && changes.serverUrl.newValue) {
       currentServerUrl = changes.serverUrl.newValue.trim().replace(/\/+$/, '');
     }
+    if (changes.timezone && changes.timezone.newValue) {
+      selectedTimezone = changes.timezone.newValue;
+      decorateGmailRows();
+      decorateThreadMessages();
+    }
     if (changes.cachedEmails && changes.cachedEmails.newValue) {
       trackedEmails = changes.cachedEmails.newValue;
       decorateGmailRows();
       decorateThreadMessages();
     }
   });
+
+  function formatTimeWithTz(isoString) {
+    if (!isoString) return '';
+    try {
+      const date = new Date(isoString);
+      const tz = selectedTimezone === 'auto'
+        ? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Cairo')
+        : selectedTimezone;
+
+      return date.toLocaleString('ar-EG', {
+        timeZone: tz,
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (e) {
+      return new Date(isoString).toLocaleString('ar-EG');
+    }
+  }
 
   function fetchTrackedEmails() {
     chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (response) => {
@@ -304,13 +336,17 @@
     badge.dataset.emailId = matched.id;
     badge.dataset.isRead = String(matched.isRead);
 
-    const dateStr = matched.firstReadAtFormatted 
-      ? matched.firstReadAtFormatted.formatted 
-      : (matched.firstReadAt ? new Date(matched.firstReadAt).toLocaleString('ar-EG') : null);
+    const dateStr = matched.firstReadAt 
+      ? formatTimeWithTz(matched.firstReadAt) 
+      : (matched.firstReadAtFormatted ? matched.firstReadAtFormatted.formatted : null);
+
+    const sentStr = matched.sentAt 
+      ? formatTimeWithTz(matched.sentAt) 
+      : (matched.sentAtFormatted ? matched.sentAtFormatted.formatted : '');
 
     badge.title = matched.isRead 
       ? `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matched.openCount} مرة\n(انقر لعرض التفاصيل)` 
-      : `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${matched.sentAtFormatted ? matched.sentAtFormatted.formatted : new Date(matched.sentAt).toLocaleString('ar-EG')}`;
+      : `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${sentStr}`;
 
     badge.innerHTML = `
       <svg class="et-svg-icon" viewBox="0 0 16 11" width="16" height="11" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -423,8 +459,12 @@
       const modal = document.createElement('div');
       modal.className = 'et-modal-overlay';
 
-      const readDate = email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.firstReadAt ? new Date(email.firstReadAt).toLocaleString('ar-EG') : 'لم يُقرأ بعد');
-      const sentDate = email.sentAtFormatted ? email.sentAtFormatted.formatted : new Date(email.sentAt).toLocaleString('ar-EG');
+      const readDate = email.firstReadAt 
+        ? formatTimeWithTz(email.firstReadAt) 
+        : (email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.isRead ? 'تمت القراءة' : 'لم يُقرأ بعد'));
+      const sentDate = email.sentAt 
+        ? formatTimeWithTz(email.sentAt) 
+        : (email.sentAtFormatted ? email.sentAtFormatted.formatted : (email.sentAt ? new Date(email.sentAt).toLocaleString('ar-EG') : ''));
 
       modal.innerHTML = `
         <div class="et-modal-card">
@@ -472,7 +512,7 @@
                   <div class="et-timeline-title">سجل مرات الفتح بالتفصيل (${email.reads.length}):</div>
                   ${email.reads.map((r, i) => `
                     <div class="et-timeline-item">
-                      <div class="et-tl-time">المرة #${i + 1}: ${r.formatted ? r.formatted.formatted : new Date(r.timestamp).toLocaleString('ar-EG')}</div>
+                      <div class="et-tl-time">المرة #${i + 1}: ${r.timestamp ? formatTimeWithTz(r.timestamp) : (r.formatted ? r.formatted.formatted : '')}</div>
                       <div class="et-tl-client">${r.clientType || 'Email Client'}</div>
                     </div>
                   `).join('')}
