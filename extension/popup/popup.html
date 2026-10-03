@@ -4,30 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EmailTracker Prime</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup-container">
+  <div class="app-wrapper">
     <!-- Header -->
-    <header class="header">
+    <header class="app-header">
       <div class="brand">
-        <span class="brand-icon">✓✓</span>
+        <div class="brand-icon">✓✓</div>
         <div class="brand-info">
           <h1>EmailTracker</h1>
-          <span class="brand-sub">تتبع قراءة الإيميل</span>
+          <span>تتبع تلقائي ذكي</span>
         </div>
       </div>
-      <div id="connection-status" class="status-pill status-connecting" title="حالة الاتصال بالخادم">
+      <div id="connection-status" class="status-pill status-connecting" title="حالة الاتصال">
         <span class="status-dot"></span>
-        <span class="status-text">جاري الاتصال...</span>
+        <span class="status-text">جاري الاتصال</span>
       </div>
     </header>
 
-    <!-- Navigation Tabs -->
+    <!-- Nav Tabs -->
     <nav class="nav-tabs">
       <button class="nav-tab active" data-tab="tab-emails">
         <span class="tab-icon">✉️</span>
-        <span>الإيميلات</span>
+        <span>الرسائل</span>
       </button>
       <button class="nav-tab" data-tab="tab-stats">
         <span class="tab-icon">📊</span>
@@ -39,22 +40,21 @@
       </button>
     </nav>
 
-    <!-- Main Content Area -->
-    <main class="content-area">
+    <!-- Main Content -->
+    <main class="main-content">
 
-      <!-- TAB 1: EMAILS LIST -->
+      <!-- TAB 1: EMAILS -->
       <section id="tab-emails" class="tab-pane active">
-        <!-- Search & Filter -->
-        <div class="filters-bar">
+        <div class="search-box">
           <input type="text" id="search-input" placeholder="بحث بالمستلم أو الموضوع..." class="search-input">
-          <div class="filter-pills">
-            <button class="filter-pill active" data-filter="all">الكل</button>
-            <button class="filter-pill" data-filter="read">مقروءة</button>
-            <button class="filter-pill" data-filter="unread">لم تُقرأ</button>
-          </div>
         </div>
 
-        <!-- Emails List Container -->
+        <div class="filter-pills">
+          <button class="filter-pill active" data-filter="all">الكل</button>
+          <button class="filter-pill" data-filter="read">مقروءة</button>
+          <button class="filter-pill" data-filter="unread">لم تُقرأ</button>
+        </div>
+
         <div id="emails-list" class="emails-list">
           <div class="empty-state">
             <span class="empty-icon">⏳</span>
@@ -66,31 +66,27 @@
       <!-- TAB 2: STATS -->
       <section id="tab-stats" class="tab-pane">
         <div class="stats-grid">
-          <div class="stat-box stat-sent">
-            <div class="stat-number" id="stat-total-sent">0</div>
-            <div class="stat-title">إجمالي المرسل</div>
+          <div class="stat-card stat-sent">
+            <div class="stat-num" id="stat-total-sent">0</div>
+            <div class="stat-lbl">إجمالي المرسل</div>
           </div>
-          <div class="stat-box stat-read">
-            <div class="stat-number" id="stat-total-read">0</div>
-            <div class="stat-title">تمت قراءتها</div>
+          <div class="stat-card stat-read">
+            <div class="stat-num" id="stat-total-read">0</div>
+            <div class="stat-lbl">تمت قراءتها</div>
           </div>
-          <div class="stat-box stat-unread">
-            <div class="stat-number" id="stat-total-unread">0</div>
-            <div class="stat-title">لم تُقرأ بعد</div>
+          <div class="stat-card stat-unread">
+            <div class="stat-num" id="stat-total-unread">0</div>
+            <div class="stat-lbl">في الانتظار</div>
           </div>
-          <div class="stat-box stat-rate">
-            <div class="stat-number" id="stat-open-rate">0%</div>
-            <div class="stat-title">نسبة القراءة</div>
+          <div class="stat-card stat-rate">
+            <div class="stat-num" id="stat-open-rate">0%</div>
+            <div class="stat-lbl">نسبة الفتح</div>
           </div>
         </div>
 
-        <div class="stats-card">
-          <h3>💡 نصائح زيادة معدل فتح الإيميلات:</h3>
-          <ul>
-            <li>اكتب عنوان إيميل واضح ومختصر (أقل من 50 حرف).</li>
-            <li>أرسل إيميلاتك في أوقات دوام العمل (9:00 صباحاً - 11:30 صباحاً).</li>
-            <li>تجنب الكلمات التي ترفع تصنيف الرسالة كـ Spam مثل "عرض عاجل جداً".</li>
-          </ul>
+        <div class="tip-card">
+          <h4>⚡ التتبع التلقائي يعمل الآن:</h4>
+          <p>أي إيميل ترسله من بريدك في Gmail يتم تتبعه لحظياً بشكل مخفي تماماً وبدون أي أزرار أو توقيعات دعائية مزعجة.</p>
         </div>
       </section>
 
@@ -98,29 +94,17 @@
       <section id="tab-settings" class="tab-pane">
         <div class="settings-form">
           <div class="form-group">
-            <label for="setting-server-url">رابط خادم التتبع (Server URL):</label>
-            <div class="input-with-btn">
-              <input type="url" id="setting-server-url" value="http://localhost:3000" placeholder="http://localhost:3000 أو رابط Ngrok">
-              <button id="btn-test-server" class="btn-secondary" title="اختبار الاتصال بالخادم">فحص</button>
+            <label for="setting-server-url">رابط السيرفر (Vercel Server URL):</label>
+            <div class="input-action">
+              <input type="url" id="setting-server-url" placeholder="https://your-tracker.vercel.app">
+              <button id="btn-test-server" class="btn-sub">فحص</button>
             </div>
-            <small class="form-hint">عند العمل على الإنترنت، يمكنك استخدام رابط نفق مثل Ngrok أو نشر الخادم على Render / Railway مجاناً.</small>
+            <small class="hint">ضع رابط Vercel الخاص بك هنا ليعمل التتبع السحابي 24/7.</small>
           </div>
 
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="setting-track-default" checked>
-              <span>تفعيل تتبع قراءة الإيميل تلقائياً عند إنشاء أي رسالة جديدة</span>
-            </label>
-          </div>
+          <button id="btn-sync-now" class="btn-sub" style="width: 100%; margin-top: 4px;">🔄 مزامنة البيانات مع السيرفر الآن</button>
 
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="setting-show-badges" checked>
-              <span>إظهار علامة القراءة (✓✓) في قائمة إيميلات Gmail مباشرة</span>
-            </label>
-          </div>
-
-          <button id="btn-save-settings" class="btn-primary">حفظ الإعدادات</button>
+          <button id="btn-save-settings" class="btn-main">حفظ الإعدادات</button>
           <div id="settings-status-msg" class="settings-msg"></div>
         </div>
       </section>
@@ -128,9 +112,9 @@
     </main>
 
     <!-- Footer -->
-    <footer class="footer">
-      <span>EmailTracker Prime v1.0</span>
-      <a href="http://localhost:3000" target="_blank" id="open-web-dashboard">فتح لوحة الويب ↗</a>
+    <footer class="app-footer">
+      <span>EmailTracker Prime</span>
+      <a href="http://localhost:3000" target="_blank" id="open-web-dashboard">لوحة التحكم السحابية ↗</a>
     </footer>
   </div>
 

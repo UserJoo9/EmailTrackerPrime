@@ -1,112 +1,81 @@
-// EmailTracker Prime - Content Script for Gmail
+// EmailTracker Prime - Content Script for Gmail (100% Automatic & Invisible Tracking)
 
 (function () {
   'use strict';
 
-  console.log('[EmailTracker Prime] Content script loaded on Gmail.');
-
   let serverUrl = 'http://localhost:3000';
   let trackedEmails = [];
-  let isTrackingByDefault = true;
 
-  // Retrieve initial server URL and settings
   function initSettings() {
-    chrome.runtime.sendMessage({ type: 'GET_SERVER_URL' }, (res) => {
-      if (res && res.serverUrl) {
-        serverUrl = res.serverUrl;
+    chrome.storage.local.get(['serverUrl', 'cachedEmails'], (data) => {
+      if (data.serverUrl) {
+        serverUrl = data.serverUrl.trim().replace(/\/+$/, '');
+      }
+      if (Array.isArray(data.cachedEmails)) {
+        trackedEmails = data.cachedEmails;
+        decorateGmailRows();
       }
     });
 
-    chrome.storage.local.get(['trackByDefault', 'serverUrl'], (data) => {
-      if (data.trackByDefault !== undefined) isTrackingByDefault = data.trackByDefault;
-      if (data.serverUrl) serverUrl = data.serverUrl;
+    chrome.runtime.sendMessage({ type: 'GET_SERVER_URL' }, (res) => {
+      if (res && res.serverUrl) {
+        serverUrl = res.serverUrl.trim().replace(/\/+$/, '');
+      }
     });
 
     fetchTrackedEmails();
   }
 
-  // Fetch tracked emails from background worker
   function fetchTrackedEmails() {
     chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (response) => {
       if (response && response.success && Array.isArray(response.emails)) {
         trackedEmails = response.emails;
+        chrome.storage.local.set({ cachedEmails: trackedEmails });
         decorateGmailRows();
       }
     });
   }
 
-  // Generate unique tracking ID
   function generateTrackingId() {
     return 'et_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
   }
 
-  // Toast notification
-  function showToast(message, duration = 4000) {
+  function showToast(message, duration = 3000) {
     const existing = document.querySelector('.et-toast');
     if (existing) existing.remove();
 
     const toast = document.createElement('div');
     toast.className = 'et-toast';
-    toast.innerHTML = `<span>✓✓</span> <span>${message}</span>`;
+    toast.innerHTML = `<span class="et-toast-check">✓✓</span> <span>${message}</span>`;
     document.body.appendChild(toast);
 
     setTimeout(() => {
-      toast.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+      toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
       toast.style.opacity = '0';
-      toast.style.transform = 'translateY(15px)';
-      setTimeout(() => toast.remove(), 400);
+      toast.style.transform = 'translateY(10px)';
+      setTimeout(() => toast.remove(), 350);
     }, duration);
   }
 
   // --------------------------------------------------------------------------
-  // 1. COMPOSE WINDOW INTEGRATION (Inject Toggle Button & Hook Send)
+  // 1. AUTOMATIC INVISIBLE TRACKING (No visible button in compose)
   // --------------------------------------------------------------------------
 
-  function injectComposeFeatures() {
-    // Gmail compose windows
+  function attachAutomaticTracking() {
     const composeDialogs = document.querySelectorAll('div[role="dialog"]');
 
     composeDialogs.forEach((dialog) => {
-      // Find toolbar area (where the Send button is)
-      const toolbar = dialog.querySelector('.btC') || dialog.querySelector('.aDh');
       const sendButton = dialog.querySelector('[role="button"][data-tooltip*="Send"]') ||
                          dialog.querySelector('.T-I.J-J5-Ji.aoO.v7.T-I-atl.L3') ||
                          dialog.querySelector('[aria-label*="Send"]');
 
-      if (!toolbar || !sendButton) return;
+      if (!sendButton) return;
 
-      // Check if button already injected
-      if (dialog.querySelector('.et-track-btn')) return;
+      // Prevent duplicate event handlers on the same dialog
+      if (dialog.dataset.etHooked === 'true') return;
+      dialog.dataset.etHooked = 'true';
 
-      // Create tracking toggle button
-      const toggleBtn = document.createElement('div');
-      toggleBtn.className = 'et-track-btn ' + (isTrackingByDefault ? 'et-active' : 'et-inactive');
-      toggleBtn.dataset.tracking = isTrackingByDefault ? 'true' : 'false';
-      toggleBtn.title = 'انقر لتبديل تتبع قراءة هذا الإيميل';
-      toggleBtn.innerHTML = `
-        <span class="et-track-icon">👁️</span>
-        <span class="et-track-label">${isTrackingByDefault ? 'تتبع القراءة (نشط)' : 'تتبع القراءة (معطل)'}</span>
-      `;
-
-      toggleBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const currentlyActive = toggleBtn.dataset.tracking === 'true';
-        const newState = !currentlyActive;
-        toggleBtn.dataset.tracking = newState ? 'true' : 'false';
-        toggleBtn.className = 'et-track-btn ' + (newState ? 'et-active' : 'et-inactive');
-        toggleBtn.querySelector('.et-track-label').textContent = newState ? 'تتبع القراءة (نشط)' : 'تتبع القراءة (معطل)';
-      });
-
-      // Insert toggle button right next to Send button
-      sendButton.parentElement.insertBefore(toggleBtn, sendButton.nextSibling);
-
-      // Handle Send click
-      const handleSend = () => {
-        const isTracking = toggleBtn.dataset.tracking === 'true';
-        if (!isTracking) return;
-
-        // Extract email details
+      const handleAutoSend = () => {
         const bodyEl = dialog.querySelector('div[aria-label="Message Body"]') ||
                        dialog.querySelector('div[role="textbox"]') ||
                        dialog.querySelector('.Am.Al.editable');
@@ -124,7 +93,6 @@
           }
         });
 
-        // Fallback for recipient input
         if (recipientList.length === 0) {
           const toField = dialog.querySelector('input[name="to"]') || dialog.querySelector('textarea[name="to"]');
           if (toField && toField.value) {
@@ -135,11 +103,13 @@
         const recipient = recipientList.join(', ') || 'مستلم عبر Gmail';
 
         if (bodyEl) {
-          // Check if pixel already attached to avoid duplicates
-          if (bodyEl.querySelector('img[data-et-id]')) return;
+          // Remove any stale or previous tracking pixels from draft
+          const existingPixels = bodyEl.querySelectorAll('img[data-et-id]');
+          existingPixels.forEach(p => p.remove());
 
+          // Create a brand new unique tracking ID and cache-busting pixel
           const trackingId = generateTrackingId();
-          const pixelUrl = `${serverUrl}/track/pixel/${trackingId}`;
+          const pixelUrl = `${serverUrl}/track/pixel/${trackingId}?_t=${Date.now()}`;
 
           const pixelImg = document.createElement('img');
           pixelImg.src = pixelUrl;
@@ -151,32 +121,32 @@
 
           bodyEl.appendChild(pixelImg);
 
-          // Register in backend
+          // Register in backend & local cache
+          const payload = {
+            id: trackingId,
+            recipient: recipient,
+            subject: subject,
+            sentAt: new Date().toISOString()
+          };
+
           chrome.runtime.sendMessage({
             type: 'REGISTER_EMAIL',
-            payload: {
-              id: trackingId,
-              recipient: recipient,
-              subject: subject,
-              sentAt: new Date().toISOString()
-            }
-          }, (res) => {
-            console.log('[EmailTracker Prime] Email registered:', trackingId, res);
-            showToast(`تم تفعيل تتبع الإيميل بنجاح (${recipient})`);
-            // Refresh tracked list in a moment
+            payload: payload
+          }, () => {
+            showToast(`تتبع تلقائي نشط ✓✓ (${recipient})`);
             setTimeout(fetchTrackedEmails, 2000);
           });
         }
       };
 
-      sendButton.addEventListener('click', handleSend, true);
+      sendButton.addEventListener('click', handleAutoSend, true);
 
-      // Also listen to Ctrl+Enter / Cmd+Enter inside the compose body
+      // Keyboard shortcut Ctrl+Enter / Cmd+Enter
       const bodyEl = dialog.querySelector('div[role="textbox"]');
       if (bodyEl) {
         bodyEl.addEventListener('keydown', (e) => {
           if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            handleSend();
+            handleAutoSend();
           }
         }, true);
       }
@@ -184,10 +154,9 @@
   }
 
   // --------------------------------------------------------------------------
-  // 2. GMAIL ROWS INTEGRATION (Double Checkmarks & Read Receipts)
+  // 2. SLEEK GMAIL ROW BADGES (✓✓ Compact Checkmarks)
   // --------------------------------------------------------------------------
 
-  // Clean strings for fuzzy matching
   function cleanSubject(str) {
     if (!str) return '';
     return str
@@ -200,18 +169,15 @@
   function decorateGmailRows() {
     if (!trackedEmails || trackedEmails.length === 0) return;
 
-    // Find all email rows in Gmail list
     const rows = document.querySelectorAll('tr.zA, tr[role="row"]');
 
     rows.forEach((row) => {
-      // Find subject element
       const subjectSpan = row.querySelector('.y6 span.bog, .bqe, .bog, span[data-thread-id]');
       if (!subjectSpan) return;
 
       const rowSubject = cleanSubject(subjectSpan.textContent);
       if (!rowSubject) return;
 
-      // Find matching tracked email
       const matchedEmail = trackedEmails.find((item) => {
         const itemSubject = cleanSubject(item.subject);
         return itemSubject && (itemSubject === rowSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject));
@@ -219,60 +185,49 @@
 
       if (!matchedEmail) return;
 
-      // Target container to place badge
-      // Place badge right before the subject or in sender/date column
-      let badgeContainer = row.querySelector('.yX.xY') || subjectSpan.parentElement;
-
-      // Avoid duplicate badges
-      let existingBadge = row.querySelector('.et-badge');
+      let existingBadge = row.querySelector('.et-row-badge');
       if (existingBadge) {
         if (existingBadge.dataset.emailId === matchedEmail.id && existingBadge.dataset.isRead === String(matchedEmail.isRead)) {
-          return; // Already up to date
+          return;
         }
         existingBadge.remove();
       }
 
-      // Create Badge Element
+      // Compact Double-Check Badge
       const badge = document.createElement('span');
-      badge.className = `et-badge ${matchedEmail.isRead ? 'et-read' : 'et-unread'}`;
+      badge.className = `et-row-badge ${matchedEmail.isRead ? 'et-is-read' : 'et-is-pending'}`;
       badge.dataset.emailId = matchedEmail.id;
       badge.dataset.isRead = String(matchedEmail.isRead);
 
       let tooltipText = '';
       if (matchedEmail.isRead) {
         const dateStr = matchedEmail.firstReadAtFormatted ? matchedEmail.firstReadAtFormatted.formatted : new Date(matchedEmail.firstReadAt).toLocaleString('ar-EG');
-        tooltipText = `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matchedEmail.openCount} مرة\n(انقر لمشاهدة التفاصيل الكاملة)`;
+        tooltipText = `تمت القراءة!\nتاريخ الفتح: ${dateStr}\nمرات الفتح: ${matchedEmail.openCount} مرة\n(انقر لمشاهدة التفاصيل)`;
       } else {
         const sentStr = matchedEmail.sentAtFormatted ? matchedEmail.sentAtFormatted.formatted : new Date(matchedEmail.sentAt).toLocaleString('ar-EG');
-        tooltipText = `تم الإرسال (لم يُقرأ بعد)\nتاريخ الإرسال: ${sentStr}`;
+        tooltipText = `تم الإرسال (لم يُقرأ بعد)\nوقت الإرسال: ${sentStr}`;
       }
 
       badge.title = tooltipText;
 
       badge.innerHTML = `
-        <span class="et-badge-check">✓✓</span>
-        <span class="et-badge-label">${matchedEmail.isRead ? 'مقروء' : 'مرسل'}</span>
-        ${matchedEmail.openCount > 1 ? `<span class="et-badge-count">${matchedEmail.openCount}</span>` : ''}
+        <span class="et-checks">✓✓</span>
+        ${matchedEmail.openCount > 1 ? `<span class="et-count">${matchedEmail.openCount}</span>` : ''}
       `;
 
-      // Open Modal Details on click
       badge.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
         openEmailDetailsModal(matchedEmail.id);
       });
 
-      // Insert at front of subject
-      if (subjectSpan) {
-        subjectSpan.parentElement.insertBefore(badge, subjectSpan);
-      } else if (badgeContainer) {
-        badgeContainer.prepend(badge);
-      }
+      // Insert cleanly right before the subject text
+      subjectSpan.parentElement.insertBefore(badge, subjectSpan);
     });
   }
 
   // --------------------------------------------------------------------------
-  // 3. DETAILED MODAL POPUP (Shows Full Open Timestamps & Log History)
+  // 3. MODERN MODAL CARD ON CLICK
   // --------------------------------------------------------------------------
 
   function openEmailDetailsModal(emailId) {
@@ -287,61 +242,54 @@
       modal.className = 'et-modal-overlay';
 
       const readDate = email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.firstReadAt ? new Date(email.firstReadAt).toLocaleString('ar-EG') : 'لم يُقرأ بعد');
-      const lastReadDate = email.lastReadAtFormatted ? email.lastReadAtFormatted.formatted : (email.lastReadAt ? new Date(email.lastReadAt).toLocaleString('ar-EG') : '-');
       const sentDate = email.sentAtFormatted ? email.sentAtFormatted.formatted : new Date(email.sentAt).toLocaleString('ar-EG');
 
       modal.innerHTML = `
         <div class="et-modal-card">
           <div class="et-modal-header">
             <div class="et-modal-title">
-              <span>${email.isRead ? '🟢' : '⚪'}</span>
+              <span class="et-modal-icon">${email.isRead ? '🟢' : '⚪'}</span>
               <span>تفاصيل قراءة الإيميل</span>
             </div>
             <button class="et-modal-close" id="et-modal-close-btn">&times;</button>
           </div>
           <div class="et-modal-body">
-            <div class="et-info-row">
-              <div class="et-info-label">المستلم:</div>
-              <div class="et-info-val">${email.recipient}</div>
+            <div class="et-field">
+              <span class="et-label">المستلم:</span>
+              <span class="et-value">${email.recipient}</span>
             </div>
-            <div class="et-info-row">
-              <div class="et-info-label">عنوان الإيميل (الموضوع):</div>
-              <div class="et-info-val">${email.subject}</div>
+            <div class="et-field">
+              <span class="et-label">موضوع الإيميل:</span>
+              <span class="et-value">${email.subject || '(بدون عنوان)'}</span>
             </div>
-            <div class="et-info-row">
-              <div class="et-info-label">وقت وتاريخ الإرسال:</div>
-              <div class="et-info-val">${sentDate}</div>
+            <div class="et-field">
+              <span class="et-label">توقيت الإرسال:</span>
+              <span class="et-value">${sentDate}</span>
             </div>
-            <div class="et-info-row">
-              <div class="et-info-label">حالة القراءة:</div>
-              <div class="et-info-val" style="color: ${email.isRead ? '#137333' : '#b06000'}; font-weight: 700;">
-                ${email.isRead ? `✓✓ تم فتح الإيميل (${email.openCount} مرة)` : '✓ لم يتم الفتح حتى الآن'}
-              </div>
+            <div class="et-field">
+              <span class="et-label">حالة القراءة:</span>
+              <span class="et-value ${email.isRead ? 'et-green' : 'et-orange'}">
+                ${email.isRead ? `✓✓ تم فتح الإيميل (${email.openCount} مرة)` : '⏳ لم يتم الفتح حتى الآن'}
+              </span>
             </div>
 
             ${email.isRead ? `
-              <div class="et-info-row">
-                <div class="et-info-label">تاريخ ووقت أول فتح:</div>
-                <div class="et-info-val" style="color: #137333; font-weight: 700;">${readDate}</div>
+              <div class="et-field">
+                <span class="et-label">تاريخ ووقت الفتح:</span>
+                <span class="et-value et-green">${readDate}</span>
               </div>
-              ${email.openCount > 1 ? `
-                <div class="et-info-row">
-                  <div class="et-info-label">تاريخ آخر فتح:</div>
-                  <div class="et-info-val">${lastReadDate}</div>
+
+              ${(email.reads && email.reads.length > 0) ? `
+                <div class="et-timeline-section">
+                  <div class="et-timeline-title">سجل مرات الفتح بالتفصيل (${email.reads.length}):</div>
+                  ${email.reads.map((r, i) => `
+                    <div class="et-timeline-item">
+                      <div class="et-tl-time">المرة #${i + 1}: ${r.formatted ? r.formatted.formatted : new Date(r.timestamp).toLocaleString('ar-EG')}</div>
+                      <div class="et-tl-client">${r.clientType || 'Email Client'}</div>
+                    </div>
+                  `).join('')}
                 </div>
               ` : ''}
-
-              <div class="et-reads-timeline">
-                <div class="et-reads-title">سجل مرات الفتح بالتفصيل (${email.reads ? email.reads.length : 0}):</div>
-                ${(email.reads || []).map((r, i) => `
-                  <div class="et-read-entry">
-                    <div>
-                      <strong>المرة #${i + 1}:</strong> ${r.formatted ? r.formatted.formatted : new Date(r.timestamp).toLocaleString('ar-EG')}
-                    </div>
-                    <div class="et-read-client">${r.clientType || 'Email Client'}</div>
-                  </div>
-                `).join('')}
-              </div>
             ` : ''}
           </div>
         </div>
@@ -349,7 +297,6 @@
 
       document.body.appendChild(modal);
 
-      // Close handlers
       modal.querySelector('#et-modal-close-btn').addEventListener('click', () => modal.remove());
       modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
@@ -358,34 +305,28 @@
   }
 
   // --------------------------------------------------------------------------
-  // 4. OBSERVERS & PERIODIC REFRESH
+  // 4. OBSERVER & SYNC
   // --------------------------------------------------------------------------
 
-  // Observe Gmail DOM mutations (new emails loading, navigating folders, opening compose)
   let debounceTimeout = null;
   const observer = new MutationObserver(() => {
     if (debounceTimeout) clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
-      injectComposeFeatures();
+      attachAutomaticTracking();
       decorateGmailRows();
     }, 300);
   });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
-  // Sync tracked emails periodically (every 15 seconds)
   setInterval(() => {
     fetchTrackedEmails();
-  }, 15000);
+  }, 10000);
 
-  // Initialize
   initSettings();
   setTimeout(() => {
-    injectComposeFeatures();
+    attachAutomaticTracking();
     decorateGmailRows();
-  }, 1500);
+  }, 1000);
 
 })();

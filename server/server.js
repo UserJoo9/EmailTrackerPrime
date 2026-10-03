@@ -6,7 +6,6 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all origins
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
@@ -35,7 +34,6 @@ const handlePixel = async (req, res) => {
 
   console.log(`[PIXEL HIT] Email ID: ${emailId} | IP: ${clientIp} | UA: ${userAgent}`);
 
-  // Record open asynchronously
   try {
     await db.recordOpen(emailId, {
       ip: clientIp,
@@ -45,7 +43,7 @@ const handlePixel = async (req, res) => {
     console.error('[Pixel Error]', err);
   }
 
-  // Response with strict no-cache headers to ensure every open is tracked
+  // Response with strict no-cache headers to bypass all caches & proxies
   res.writeHead(200, {
     'Content-Type': 'image/gif',
     'Content-Length': TRANSPARENT_GIF_BUFFER.length,
@@ -80,6 +78,25 @@ app.post('/api/emails', async (req, res) => {
     res.status(201).json({ success: true, email });
   } catch (err) {
     console.error('[API Error /api/emails POST]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch sync (allows extension to sync offline cached emails if missing on server)
+app.post('/api/emails/sync', async (req, res) => {
+  try {
+    const { emails } = req.body;
+    if (Array.isArray(emails)) {
+      for (const item of emails) {
+        const existing = await db.getEmail(item.id);
+        if (!existing) {
+          await db.saveEmail(item);
+        }
+      }
+    }
+    const all = await db.getAllEmails();
+    res.json({ success: true, emails: all });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -131,7 +148,7 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// Web Dashboard UI
+// Web Dashboard UI (Modern, Glassmorphism, Sleek Dark UI)
 app.get('/', async (req, res) => {
   try {
     const stats = await db.getStats();
@@ -143,103 +160,428 @@ app.get('/', async (req, res) => {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>EmailTracker Prime - لوحة التحكم</title>
-        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+        <title>EmailTracker Prime | لوحة المتابعة</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
         <style>
           :root {
-            --primary: #2563eb;
-            --success: #16a34a;
-            --warning: #f59e0b;
-            --bg: #0f172a;
-            --card: #1e293b;
-            --text: #f8fafc;
+            --bg: #090d16;
+            --surface: #0f172a;
+            --surface-hover: #1e293b;
+            --card-border: #1e293b;
+            --card-border-glow: #334155;
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.15);
+            --emerald: #10b981;
+            --emerald-bg: rgba(16, 185, 129, 0.12);
+            --amber: #f59e0b;
+            --amber-bg: rgba(245, 158, 11, 0.12);
+            --text-main: #f8fafc;
             --text-muted: #94a3b8;
-            --border: #334155;
+            --text-dim: #64748b;
           }
-          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
-          body { background: var(--bg); color: var(--text); padding: 30px 20px; }
-          .container { max-width: 1000px; margin: 0 auto; }
-          header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
-          h1 { font-size: 26px; display: flex; align-items: center; gap: 10px; }
-          .badge { background: #3b82f620; color: #60a5fa; padding: 4px 12px; border-radius: 20px; font-size: 13px; border: 1px solid #3b82f640; }
-          .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
-          .stat-card { background: var(--card); border: 1px solid var(--border); padding: 20px; border-radius: 12px; text-align: center; }
-          .stat-val { font-size: 32px; font-weight: 800; margin-top: 5px; }
-          .stat-label { color: var(--text-muted); font-size: 14px; }
-          .val-read { color: var(--success); }
-          .val-unread { color: var(--warning); }
-          .val-total { color: #38bdf8; }
-          .val-rate { color: #c084fc; }
-          table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
-          th, td { padding: 14px 18px; text-align: right; border-bottom: 1px solid var(--border); font-size: 14px; }
-          th { background: #162032; color: var(--text-muted); font-weight: 600; }
-          tr:last-child td { border-bottom: none; }
-          .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-          .status-read { background: #16a34a22; color: #4ade80; border: 1px solid #16a34a44; }
-          .status-unread { background: #f59e0b22; color: #fcd34d; border: 1px solid #f59e0b44; }
-          .time-text { font-size: 12px; color: var(--text-muted); }
+
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Cairo', -apple-system, BlinkMacSystemFont, sans-serif;
+          }
+
+          body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 40px 24px;
+            background-image: 
+              radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+              radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+          }
+
+          .container {
+            max-width: 1180px;
+            margin: 0 auto;
+          }
+
+          /* Header */
+          header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 36px;
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            padding: 20px 28px;
+            border-radius: 18px;
+            border: 1px solid var(--card-border);
+          }
+
+          .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+          }
+
+          .brand-logo {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #2563eb, #10b981);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 900;
+            color: #fff;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+          }
+
+          .brand-text h1 {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+
+          .brand-tag {
+            font-size: 11px;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            padding: 2px 10px;
+            border-radius: 20px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-weight: 600;
+          }
+
+          .brand-text p {
+            font-size: 13px;
+            color: var(--text-muted);
+          }
+
+          .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+
+          .refresh-btn {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            text-decoration: none;
+          }
+
+          .refresh-btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--card-border-glow);
+          }
+
+          /* Metrics Grid */
+          .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            margin-bottom: 36px;
+          }
+
+          @media (max-width: 900px) {
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+          }
+          @media (max-width: 550px) {
+            .metrics-grid { grid-template-columns: 1fr; }
+          }
+
+          .metric-card {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 22px;
+            transition: transform 0.2s, border-color 0.2s;
+            position: relative;
+            overflow: hidden;
+          }
+
+          .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--card-border-glow);
+          }
+
+          .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+
+          .metric-title {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 600;
+          }
+
+          .metric-icon {
+            font-size: 18px;
+            padding: 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+          }
+
+          .metric-value {
+            font-size: 32px;
+            font-weight: 800;
+            line-height: 1;
+            letter-spacing: -1px;
+            font-family: 'JetBrains Mono', monospace;
+          }
+
+          .val-sent { color: #60a5fa; }
+          .val-read { color: #34d399; }
+          .val-unread { color: #fbbf24; }
+          .val-rate { color: #a78bfa; }
+
+          /* Table Section */
+          .section-card {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--card-border);
+            border-radius: 18px;
+            overflow: hidden;
+          }
+
+          .section-header {
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--card-border);
+          }
+
+          .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+
+          .table-wrapper {
+            overflow-x: auto;
+          }
+
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: right;
+          }
+
+          th {
+            background: rgba(11, 17, 33, 0.8);
+            padding: 14px 20px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 700;
+            border-bottom: 1px solid var(--card-border);
+            white-space: nowrap;
+          }
+
+          td {
+            padding: 16px 20px;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(30, 41, 59, 0.5);
+            vertical-align: middle;
+          }
+
+          tr:last-child td {
+            border-bottom: none;
+          }
+
+          tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+          }
+
+          .status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+          }
+
+          .status-chip.is-read {
+            background: var(--emerald-bg);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+          }
+
+          .status-chip.is-pending {
+            background: var(--amber-bg);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.25);
+          }
+
+          .time-badge {
+            color: var(--text-muted);
+            font-size: 12px;
+          }
+
+          .highlight-time {
+            color: #34d399;
+            font-weight: 600;
+          }
+
+          .open-count-badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+          }
+
+          .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-muted);
+          }
+
+          .empty-icon {
+            font-size: 44px;
+            margin-bottom: 12px;
+            display: inline-block;
+          }
+
+          .empty-state p {
+            font-size: 14px;
+            line-height: 1.6;
+          }
         </style>
       </head>
       <body>
         <div class="container">
           <header>
-            <h1>✉️ EmailTracker Prime <span class="badge">خادم التتبع نشط (Vercel Ready)</span></h1>
-            <div><a href="javascript:location.reload()" style="color: #60a5fa; text-decoration: none; font-size: 14px;">🔄 تحديث البيانات</a></div>
+            <div class="brand">
+              <div class="brand-logo">✓✓</div>
+              <div class="brand-text">
+                <h1>EmailTracker Prime <span class="brand-tag">نشط السحاب</span></h1>
+                <p>تتبع فتح وقراءة رسائل البريد الإلكتروني بدقة متناهية</p>
+              </div>
+            </div>
+            <div class="header-actions">
+              <a href="javascript:location.reload()" class="refresh-btn">
+                <span>🔄</span>
+                <span>تحديث البيانات</span>
+              </a>
+            </div>
           </header>
 
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">إجمالي الإيميلات المرسلة</div>
-              <div class="stat-val val-total">${stats.totalSent}</div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">إجمالي المرسل</span>
+                <span class="metric-icon">✉️</span>
+              </div>
+              <div class="metric-value val-sent">${stats.totalSent}</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">تمت قراءتها (مقروءة)</div>
-              <div class="stat-val val-read">${stats.totalRead}</div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">تمت قراءتها (مقروء)</span>
+                <span class="metric-icon">🟢</span>
+              </div>
+              <div class="metric-value val-read">${stats.totalRead}</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">لم تُقرأ بعد</div>
-              <div class="stat-val val-unread">${stats.totalUnread}</div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">في الانتظار (لم يُفتح)</span>
+                <span class="metric-icon">⏳</span>
+              </div>
+              <div class="metric-value val-unread">${stats.totalUnread}</div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">نسبة القراءة</div>
-              <div class="stat-val val-rate">${stats.openRate}%</div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-title">معدل الفتح</span>
+                <span class="metric-icon">📊</span>
+              </div>
+              <div class="metric-value val-rate">${stats.openRate}%</div>
             </div>
           </div>
 
-          <h2 style="margin-bottom: 15px; font-size: 18px;">سجل الإيميلات المتتبعة</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>الحالة</th>
-                <th>المستلم</th>
-                <th>عنوان الإيميل</th>
-                <th>وقت الإرسال</th>
-                <th>تاريخ ووقت أول فتح</th>
-                <th>مرات الفتح</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${emails.length === 0 ? '<tr><td colspan="6" style="text-align: center; color: #64748b; padding: 40px;">لا توجد إيميلات متتبعة بعد. أرسل إيميلك الأول من Gmail!</td></tr>' : ''}
-              ${emails.map(e => `
-                <tr>
-                  <td>
-                    <span class="status-badge ${e.isRead ? 'status-read' : 'status-unread'}">
-                      ${e.isRead ? '✓✓ تم الفتح' : '✓ مرسل (لم يفتح)'}
-                    </span>
-                  </td>
-                  <td style="font-weight: 600;">${e.recipient}</td>
-                  <td>${e.subject}</td>
-                  <td class="time-text">${e.sentAtFormatted ? e.sentAtFormatted.formatted : new Date(e.sentAt).toLocaleString('ar-EG')}</td>
-                  <td>
-                    ${e.isRead ? `<span style="color: #4ade80; font-weight: 600;">${e.firstReadAtFormatted ? e.firstReadAtFormatted.formatted : new Date(e.firstReadAt).toLocaleString('ar-EG')}</span>` : '<span style="color: #64748b;">-</span>'}
-                  </td>
-                  <td>
-                    ${e.openCount > 0 ? `<span style="background: #334155; padding: 2px 8px; border-radius: 10px; font-size: 12px;">${e.openCount} مرة</span>` : '-'}
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+          <div class="section-card">
+            <div class="section-header">
+              <div class="section-title">
+                <span>📋</span>
+                <span>سجل الإيميلات المتتبعة</span>
+              </div>
+            </div>
+
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الحالة</th>
+                    <th>المستلم</th>
+                    <th>موضوع الإيميل</th>
+                    <th>وقت الإرسال</th>
+                    <th>تاريخ ووقت الفتح</th>
+                    <th>مرات الفتح</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${emails.length === 0 ? `
+                    <tr>
+                      <td colspan="6">
+                        <div class="empty-state">
+                          <span class="empty-icon">📭</span>
+                          <p>لا توجد إيميلات متتبعة مسجلة حتى الآن.<br>أرسل إيميلك من Gmail وسيظهر هنا تلقائياً!</p>
+                        </div>
+                      </td>
+                    </tr>
+                  ` : emails.map(e => `
+                    <tr>
+                      <td>
+                        <span class="status-chip ${e.isRead ? 'is-read' : 'is-pending'}">
+                          ${e.isRead ? '✓✓ تم الفتح' : '⏳ لم يُقرأ بعد'}
+                        </span>
+                      </td>
+                      <td style="font-weight: 700; color: #f1f5f9;">${e.recipient}</td>
+                      <td style="color: #cbd5e1; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${e.subject || '(بدون عنوان)'}</td>
+                      <td class="time-badge">${e.sentAtFormatted ? e.sentAtFormatted.formatted : new Date(e.sentAt).toLocaleString('ar-EG')}</td>
+                      <td>
+                        ${e.isRead ? `
+                          <span class="highlight-time">${e.firstReadAtFormatted ? e.firstReadAtFormatted.formatted : new Date(e.firstReadAt).toLocaleString('ar-EG')}</span>
+                        ` : '<span style="color: var(--text-dim);">-</span>'}
+                      </td>
+                      <td>
+                        ${e.openCount > 0 ? `
+                          <span class="open-count-badge">${e.openCount} مرة</span>
+                        ` : '<span style="color: var(--text-dim);">-</span>'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </body>
       </html>
@@ -249,16 +591,10 @@ app.get('/', async (req, res) => {
   }
 });
 
-// Start listening if running directly
 if (require.main === module || !process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 EmailTracker Prime Server is running!`);
-    console.log(`📡 Local URL: http://localhost:${PORT}`);
-    console.log(`📊 Dashboard: http://localhost:${PORT}/`);
-    console.log(`=======================================================`);
+    console.log(`🚀 EmailTracker Server running on port ${PORT}`);
   });
 }
 
-// Export for Vercel Serverless Function
 module.exports = app;

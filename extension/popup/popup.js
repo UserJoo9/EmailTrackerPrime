@@ -5,9 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentFilter = 'all';
   let searchQuery = '';
 
-  // Elements
   const statusPill = document.getElementById('connection-status');
-  const statusDot = statusPill.querySelector('.status-dot');
   const statusText = statusPill.querySelector('.status-text');
 
   const emailsList = document.getElementById('emails-list');
@@ -23,13 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const serverUrlInput = document.getElementById('setting-server-url');
   const btnTestServer = document.getElementById('btn-test-server');
-  const trackDefaultCheckbox = document.getElementById('setting-track-default');
-  const showBadgesCheckbox = document.getElementById('setting-show-badges');
   const btnSaveSettings = document.getElementById('btn-save-settings');
+  const btnSyncNow = document.getElementById('btn-sync-now');
   const settingsMsg = document.getElementById('settings-status-msg');
   const openWebDashboard = document.getElementById('open-web-dashboard');
 
-  // 1. Navigation Tabs
+  // Navigation Tabs
   navTabs.forEach(tab => {
     tab.addEventListener('click', () => {
       navTabs.forEach(t => t.classList.remove('active'));
@@ -45,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 2. Filters & Search
+  // Filters & Search
   filterPills.forEach(pill => {
     pill.addEventListener('click', () => {
       filterPills.forEach(p => p.classList.remove('active'));
@@ -60,44 +57,64 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEmails();
   });
 
-  // 3. Check Server Connectivity
+  // Check Server Health & Auto Sync
   function checkServerHealth() {
     chrome.runtime.sendMessage({ type: 'CHECK_SERVER' }, (res) => {
       if (res && res.reachable) {
         statusPill.className = 'status-pill status-connected';
-        statusText.textContent = 'متصل بالخادم';
+        statusText.textContent = 'متصل بالسيرفر';
+        syncEmailsToServer();
       } else {
         statusPill.className = 'status-pill status-disconnected';
-        statusText.textContent = 'الخادم غير متصل';
+        statusText.textContent = 'غير متصل';
       }
     });
   }
 
-  // 4. Load Emails
+  // Sync cached local emails to server
+  function syncEmailsToServer() {
+    chrome.storage.local.get(['cachedEmails', 'serverUrl'], (data) => {
+      if (Array.isArray(data.cachedEmails) && data.cachedEmails.length > 0 && data.serverUrl) {
+        fetch(`${data.serverUrl.replace(/\/+$/, '')}/api/emails/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emails: data.cachedEmails })
+        }).then(r => r.json()).then(res => {
+          if (res && res.success) {
+            console.log('[EmailTracker] Synced emails with server.');
+            loadEmails();
+          }
+        }).catch(() => {});
+      }
+    });
+  }
+
+  // Load Emails
   function loadEmails() {
     chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (res) => {
       if (res && res.success && Array.isArray(res.emails)) {
         allEmails = res.emails;
+        chrome.storage.local.set({ cachedEmails: allEmails });
         renderEmails();
+        loadStats();
       } else {
-        emailsList.innerHTML = `
-          <div class="empty-state">
-            <span class="empty-icon">⚠️</span>
-            <p>تعذر الاتصال بخادم التتبع.<br>تأكد من تشغيل الخادم أولاً.</p>
-          </div>
-        `;
+        // Fallback to local cache
+        chrome.storage.local.get(['cachedEmails'], (data) => {
+          if (Array.isArray(data.cachedEmails)) {
+            allEmails = data.cachedEmails;
+            renderEmails();
+          }
+        });
       }
     });
   }
 
-  // Render Emails List
+  // Render List
   function renderEmails() {
     let filtered = allEmails.filter(email => {
-      // Filter tab
       if (currentFilter === 'read' && !email.isRead) return false;
       if (currentFilter === 'unread' && email.isRead) return false;
 
-      // Search query
       if (searchQuery) {
         const matchRecip = (email.recipient || '').toLowerCase().includes(searchQuery);
         const matchSubj = (email.subject || '').toLowerCase().includes(searchQuery);
@@ -110,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
       emailsList.innerHTML = `
         <div class="empty-state">
           <span class="empty-icon">📭</span>
-          <p>${allEmails.length === 0 ? 'لا توجد إيميلات متتبعة حتى الآن.<br>أرسل أول إيميل من Gmail!' : 'لا توجد نتائج تطابق بحثك.'}</p>
+          <p>${allEmails.length === 0 ? 'لا توجد إيميلات متتبعة بعد.<br>أرسل إيميلك من بريد Gmail وسيتم تتبعه فوراً!' : 'لا توجد نتائج تطابق بحثك.'}</p>
         </div>
       `;
       return;
@@ -118,38 +135,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     emailsList.innerHTML = filtered.map(email => {
       const isRead = email.isRead;
-      const sentTimeStr = email.sentAtFormatted ? email.sentAtFormatted.formatted : new Date(email.sentAt).toLocaleString('ar-EG');
-      const openTimeStr = email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.firstReadAt ? new Date(email.firstReadAt).toLocaleString('ar-EG') : null);
+      const sentStr = email.sentAtFormatted ? email.sentAtFormatted.formatted : new Date(email.sentAt).toLocaleString('ar-EG');
+      const openStr = email.firstReadAtFormatted ? email.firstReadAtFormatted.formatted : (email.firstReadAt ? new Date(email.firstReadAt).toLocaleString('ar-EG') : null);
 
       return `
         <div class="email-card ${isRead ? 'is-read' : 'is-unread'}">
-          <div class="card-top">
-            <div class="card-recipient" title="${email.recipient}">${email.recipient}</div>
-            <span class="card-badge ${isRead ? 'badge-read' : 'badge-unread'}">
+          <div class="card-header">
+            <div class="card-recip" title="${email.recipient}">${email.recipient}</div>
+            <span class="card-chip ${isRead ? 'chip-read' : 'chip-pending'}">
               <span>${isRead ? '✓✓ مقروء' : '✓ مرسل'}</span>
             </span>
           </div>
 
           <div class="card-subject" title="${email.subject}">${email.subject || '(بدون عنوان)'}</div>
 
-          <div class="card-details">
-            <div class="detail-row">
-              <span>وقت الإرسال:</span>
-              <span>${sentTimeStr}</span>
+          <div class="card-meta">
+            <div class="meta-row">
+              <span>الإرسال:</span>
+              <span>${sentStr}</span>
             </div>
 
             ${isRead ? `
-              <div class="detail-row">
-                <span class="detail-highlight">🟢 تاريخ الفتح:</span>
-                <span class="detail-highlight">${openTimeStr}</span>
+              <div class="meta-row">
+                <span class="meta-open">🟢 فتح في:</span>
+                <span class="meta-open">${openStr}</span>
               </div>
-              <div class="detail-row">
+              <div class="meta-row">
                 <span>مرات الفتح:</span>
-                <span class="detail-open-count">${email.openCount} مرة</span>
+                <span class="meta-count">${email.openCount} مرة</span>
               </div>
             ` : `
-              <div class="detail-row" style="color: #9aa0a6;">
-                <span>حالة القراءة:</span>
+              <div class="meta-row" style="color: #94a3b8;">
+                <span>الحالة:</span>
                 <span>لم يُفتح بعد</span>
               </div>
             `}
@@ -159,7 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  // 5. Load Stats
+  // Load Stats
   function loadStats() {
     chrome.runtime.sendMessage({ type: 'GET_STATS' }, (res) => {
       if (res && res.success && res.stats) {
@@ -168,18 +185,23 @@ document.addEventListener('DOMContentLoaded', () => {
         statRead.textContent = s.totalRead;
         statUnread.textContent = s.totalUnread;
         statRate.textContent = `${s.openRate}%`;
+      } else {
+        const total = allEmails.length;
+        const read = allEmails.filter(e => e.isRead).length;
+        statSent.textContent = total;
+        statRead.textContent = read;
+        statUnread.textContent = total - read;
+        statRate.textContent = total > 0 ? `${Math.round((read/total)*100)}%` : '0%';
       }
     });
   }
 
-  // 6. Settings Handling
-  chrome.storage.local.get(['serverUrl', 'trackByDefault', 'showBadgesInGmail'], (data) => {
+  // Settings
+  chrome.storage.local.get(['serverUrl'], (data) => {
     if (data.serverUrl) {
       serverUrlInput.value = data.serverUrl;
       if (openWebDashboard) openWebDashboard.href = data.serverUrl;
     }
-    if (data.trackByDefault !== undefined) trackDefaultCheckbox.checked = data.trackByDefault;
-    if (data.showBadgesInGmail !== undefined) showBadgesCheckbox.checked = data.showBadgesInGmail;
   });
 
   btnTestServer.addEventListener('click', () => {
@@ -188,17 +210,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     fetch(`${testUrl}/api/stats`)
       .then(res => res.json())
-      .then(data => {
+      .then(() => {
         btnTestServer.textContent = 'ناجح ✓';
-        btnTestServer.style.color = 'var(--success)';
+        btnTestServer.style.color = 'var(--emerald)';
         setTimeout(() => {
           btnTestServer.textContent = 'فحص';
           btnTestServer.style.color = '';
         }, 2000);
       })
-      .catch(err => {
+      .catch(() => {
         btnTestServer.textContent = 'فشل ✗';
-        btnTestServer.style.color = 'var(--danger)';
+        btnTestServer.style.color = 'var(--rose)';
         setTimeout(() => {
           btnTestServer.textContent = 'فحص';
           btnTestServer.style.color = '';
@@ -208,24 +230,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnSaveSettings.addEventListener('click', () => {
     const url = serverUrlInput.value.trim().replace(/\/+$/, '');
-    const trackDefault = trackDefaultCheckbox.checked;
-    const showBadges = showBadgesCheckbox.checked;
-
-    chrome.storage.local.set({
-      serverUrl: url,
-      trackByDefault: trackDefault,
-      showBadgesInGmail: showBadges
-    }, () => {
+    chrome.storage.local.set({ serverUrl: url }, () => {
       settingsMsg.className = 'settings-msg success';
       settingsMsg.textContent = 'تم حفظ الإعدادات بنجاح!';
       if (openWebDashboard) openWebDashboard.href = url;
       checkServerHealth();
-      loadEmails();
-      setTimeout(() => { settingsMsg.textContent = ''; }, 3000);
+      syncEmailsToServer();
+      setTimeout(() => { settingsMsg.textContent = ''; }, 2500);
     });
   });
 
-  // Initial calls
+  if (btnSyncNow) {
+    btnSyncNow.addEventListener('click', () => {
+      btnSyncNow.textContent = 'جاري المزامنة...';
+      syncEmailsToServer();
+      setTimeout(() => {
+        btnSyncNow.textContent = 'تمت المزامنة بنجاح ✓';
+        setTimeout(() => {
+          btnSyncNow.textContent = '🔄 مزامنة البيانات مع السيرفر الآن';
+        }, 2000);
+      }, 1000);
+    });
+  }
+
   checkServerHealth();
   loadEmails();
 });

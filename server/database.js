@@ -1,17 +1,33 @@
 const fs = require('fs');
 const path = require('path');
+const { Redis } = require('@upstash/redis');
 
-// Determine storage mode:
-// If Upstash / Vercel KV env vars are set, use Cloud Redis REST API.
-// Otherwise, use local file persistence (or /tmp on Vercel serverless).
-const UPSTASH_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const UPSTASH_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const IS_CLOUD_KV = Boolean(UPSTASH_URL && UPSTASH_TOKEN);
+// Initialize Redis if Upstash or Vercel KV environment variables exist
+let redis = null;
+const upstashUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
-// Local file paths
+if (upstashUrl && upstashToken) {
+  try {
+    redis = new Redis({
+      url: upstashUrl,
+      token: upstashToken,
+    });
+    console.log('[Database] Connected to Cloud Redis (Upstash/Vercel KV).');
+  } catch (err) {
+    console.error('[Database] Redis connection failed, falling back to local file:', err);
+    redis = null;
+  }
+} else {
+  console.log('[Database] No Redis environment variables found. Using local file storage.');
+}
+
+// Local file storage fallback
 const IS_VERCEL = Boolean(process.env.VERCEL);
 const DATA_DIR = IS_VERCEL ? '/tmp' : path.join(__dirname, 'data');
 const DB_FILE = path.join(DATA_DIR, 'emails.json');
+
+let emailsCache = {};
 
 if (!IS_VERCEL && !fs.existsSync(DATA_DIR)) {
   try {
@@ -19,59 +35,32 @@ if (!IS_VERCEL && !fs.existsSync(DATA_DIR)) {
   } catch (e) {}
 }
 
-// In-memory cache
-let emails = {};
-
-// Helper: Upstash REST request
-async function upstashRequest(command, ...args) {
-  if (!IS_CLOUD_KV) return null;
-  try {
-    const res = await fetch(`${UPSTASH_URL}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${UPSTASH_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify([command, ...args])
-    });
-    const data = await res.json();
-    return data.result;
-  } catch (err) {
-    console.error('[Upstash Cloud KV Error]', err);
-    return null;
-  }
-}
-
-// Load data from disk on startup
-function loadDatabase() {
+function loadLocalDatabase() {
   try {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
-      emails = JSON.parse(content || '{}');
-      console.log(`[Database] Loaded ${Object.keys(emails).length} tracked emails from disk.`);
-    } else {
-      emails = {};
+      emailsCache = JSON.parse(content || '{}');
     }
   } catch (err) {
-    console.error('[Database] Error loading database:', err);
-    emails = {};
+    emailsCache = {};
   }
 }
 
-// Save data to disk
-function saveDatabase() {
+function saveLocalDatabase() {
   try {
     const tempFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(emails, null, 2), 'utf-8');
+    fs.writeFileSync(tempFile, JSON.stringify(emailsCache, null, 2), 'utf-8');
     fs.renameSync(tempFile, DB_FILE);
   } catch (err) {
-    console.error('[Database] Error saving database:', err);
+    console.error('[Database] Local save error:', err);
   }
 }
 
-// Parse user agent to friendly device/browser name
+loadLocalDatabase();
+
+// Parse user agent to friendly name
 function parseUserAgent(ua) {
-  if (!ua) return 'Unknown Client';
+  if (!ua) return 'Email Client';
   if (ua.includes('GoogleImageProxy')) return 'Gmail (Google Proxy)';
   if (ua.includes('iPhone') || ua.includes('iPad')) return 'Apple iOS Mail';
   if (ua.includes('Macintosh')) return 'Apple Mac Mail / Browser';
@@ -83,7 +72,6 @@ function parseUserAgent(ua) {
   return 'Web / Email Client';
 }
 
-// Format friendly local date/time
 function formatTimestamp(isoString) {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -110,13 +98,15 @@ function formatTimestamp(isoString) {
   };
 }
 
+const REDIS_KEY = 'emailtracker:emails';
+
 const db = {
-  // Create or register a newly tracked email
+  // Save newly registered email
   async saveEmail({ id, recipient, subject, sentAt }) {
     const now = sentAt || new Date().toISOString();
     const record = {
       id,
-      recipient: recipient || 'مستلم غير محدد',
+      recipient: recipient || 'مستلم عبر Gmail',
       subject: subject || 'بدون عنوان',
       sentAt: now,
       sentAtFormatted: formatTimestamp(now),
@@ -129,12 +119,16 @@ const db = {
       reads: []
     };
 
-    emails[id] = record;
+    emailsCache[id] = record;
 
-    if (IS_CLOUD_KV) {
-      await upstashRequest('HSET', 'emailtracker:emails', id, JSON.stringify(record));
+    if (redis) {
+      try {
+        await redis.hset(REDIS_KEY, { [id]: JSON.stringify(record) });
+      } catch (err) {
+        console.error('[Redis Save Error]', err);
+      }
     } else {
-      saveDatabase();
+      saveLocalDatabase();
     }
 
     return record;
@@ -142,54 +136,54 @@ const db = {
 
   // Record an open event when tracking pixel is fetched
   async recordOpen(id, clientInfo = {}) {
-    let target = emails[id];
+    let target = null;
 
-    // If cloud KV enabled, try to fetch from Redis
-    if (IS_CLOUD_KV) {
-      const remote = await upstashRequest('HGET', 'emailtracker:emails', id);
-      if (remote) {
-        try {
-          target = typeof remote === 'string' ? JSON.parse(remote) : remote;
-        } catch (e) {}
+    if (redis) {
+      try {
+        const val = await redis.hget(REDIS_KEY, id);
+        if (val) {
+          target = typeof val === 'string' ? JSON.parse(val) : val;
+        }
+      } catch (e) {
+        console.error('[Redis Fetch in recordOpen]', e);
       }
     }
 
     if (!target) {
-      target = {
-        id,
-        recipient: 'غير معروف',
-        subject: 'إيميل مسجل تلقائياً',
-        sentAt: new Date().toISOString(),
-        sentAtFormatted: formatTimestamp(new Date().toISOString()),
-        isRead: true,
-        openCount: 0,
-        firstReadAt: null,
-        firstReadAtFormatted: null,
-        lastReadAt: null,
-        lastReadAtFormatted: null,
-        reads: []
-      };
+      target = emailsCache[id];
     }
 
     const now = new Date().toISOString();
     const formatted = formatTimestamp(now);
     const clientType = parseUserAgent(clientInfo.userAgent);
 
-    // Filter out rapid duplicate hits within 3 seconds
-    const lastOpen = target.reads[target.reads.length - 1];
-    const isRapidDuplicate = lastOpen && (new Date(now).getTime() - new Date(lastOpen.timestamp).getTime() < 3000);
-
-    if (!isRapidDuplicate) {
+    if (!target) {
+      target = {
+        id,
+        recipient: 'مستلم غير محدد',
+        subject: 'إيميل مسجل تلقائياً',
+        sentAt: now,
+        sentAtFormatted: formatted,
+        isRead: true,
+        openCount: 1,
+        firstReadAt: now,
+        firstReadAtFormatted: formatted,
+        lastReadAt: now,
+        lastReadAtFormatted: formatted,
+        reads: []
+      };
+    } else {
       target.openCount = (target.openCount || 0) + 1;
+      target.isRead = true;
+      if (!target.firstReadAt) {
+        target.firstReadAt = now;
+        target.firstReadAtFormatted = formatted;
+      }
+      target.lastReadAt = now;
+      target.lastReadAtFormatted = formatted;
     }
 
-    target.isRead = true;
-    if (!target.firstReadAt) {
-      target.firstReadAt = now;
-      target.firstReadAtFormatted = formatted;
-    }
-    target.lastReadAt = now;
-    target.lastReadAtFormatted = formatted;
+    if (!Array.isArray(target.reads)) target.reads = [];
 
     target.reads.push({
       timestamp: now,
@@ -199,60 +193,63 @@ const db = {
       clientType: clientType
     });
 
-    emails[id] = target;
+    emailsCache[id] = target;
 
-    if (IS_CLOUD_KV) {
-      await upstashRequest('HSET', 'emailtracker:emails', id, JSON.stringify(target));
+    if (redis) {
+      try {
+        await redis.hset(REDIS_KEY, { [id]: JSON.stringify(target) });
+      } catch (err) {
+        console.error('[Redis RecordOpen Save Error]', err);
+      }
     } else {
-      saveDatabase();
+      saveLocalDatabase();
     }
 
     return target;
   },
 
   async getEmail(id) {
-    if (IS_CLOUD_KV) {
-      const remote = await upstashRequest('HGET', 'emailtracker:emails', id);
-      if (remote) {
-        try {
-          return typeof remote === 'string' ? JSON.parse(remote) : remote;
-        } catch (e) {}
-      }
+    if (redis) {
+      try {
+        const val = await redis.hget(REDIS_KEY, id);
+        if (val) {
+          return typeof val === 'string' ? JSON.parse(val) : val;
+        }
+      } catch (e) {}
     }
-    return emails[id] || null;
+    return emailsCache[id] || null;
   },
 
   async getAllEmails() {
-    if (IS_CLOUD_KV) {
-      const all = await upstashRequest('HGETALL', 'emailtracker:emails');
-      if (all) {
-        // Upstash HGETALL returns either an object or key-value array
-        const list = [];
-        if (Array.isArray(all)) {
-          for (let i = 1; i < all.length; i += 2) {
-            try { list.push(JSON.parse(all[i])); } catch (e) {}
-          }
-        } else if (typeof all === 'object') {
+    if (redis) {
+      try {
+        const all = await redis.hgetall(REDIS_KEY);
+        if (all && typeof all === 'object') {
+          const list = [];
           for (const key in all) {
             try {
               const val = typeof all[key] === 'string' ? JSON.parse(all[key]) : all[key];
               list.push(val);
             } catch (e) {}
           }
+          return list.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
         }
-        return list.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+      } catch (err) {
+        console.error('[Redis getAllEmails Error]', err);
       }
     }
-    return Object.values(emails).sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    return Object.values(emailsCache).sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
   },
 
   async deleteEmail(id) {
-    if (IS_CLOUD_KV) {
-      await upstashRequest('HDEL', 'emailtracker:emails', id);
+    if (redis) {
+      try {
+        await redis.hdel(REDIS_KEY, id);
+      } catch (e) {}
     }
-    if (emails[id]) {
-      delete emails[id];
-      if (!IS_CLOUD_KV) saveDatabase();
+    if (emailsCache[id]) {
+      delete emailsCache[id];
+      if (!redis) saveLocalDatabase();
       return true;
     }
     return false;
@@ -273,7 +270,5 @@ const db = {
     };
   }
 };
-
-loadDatabase();
 
 module.exports = db;
