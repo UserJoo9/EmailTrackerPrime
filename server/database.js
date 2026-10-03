@@ -72,6 +72,74 @@ function parseUserAgent(ua) {
   return 'Web / Email Client';
 }
 
+// Bot and prefetch scanner detector
+function isBotOrPrefetch(userAgent = '', headers = {}) {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+
+  // 1. Google automated security sandbox / prefetch bot
+  // Specific signature: Chrome/42.0.2311.135 and Edge/12.246 (without human proxy string)
+  if (ua.includes('edge/12.246') || ua.includes('chrome/42.0.2311.135')) {
+    return true;
+  }
+
+  // 2. Prefetch / Preview headers
+  const purpose = (
+    headers['purpose'] || 
+    headers['sec-purpose'] || 
+    headers['x-purpose'] || 
+    headers['x-moz'] || 
+    ''
+  ).toLowerCase();
+
+  if (purpose.includes('prefetch') || purpose.includes('preview')) {
+    return true;
+  }
+
+  // 3. Known automated security scanners, bots, and crawlers
+  const botSignatures = [
+    'bot', 'crawl', 'spider', 'slurp', 'headlesschrome', 'phantomjs',
+    'puppeteer', 'selenium', 'barracuda', 'proofpoint', 'mimecast',
+    'symantec', 'trendmicro', 'sophos', 'fireeye', 'virustotal',
+    'paloalto', 'forcepoint', 'cisco', 'ironport', 'microsoft-office',
+    'ms-office', 'bingpreview', 'google-safety', 'google-read-aloud',
+    'feedfetcher', 'googleproducer', 'python-requests', 'curl', 'wget',
+    'go-http-client', 'node-fetch', 'undici', 'axios', 'httplib'
+  ];
+
+  for (const sig of botSignatures) {
+    if (ua.includes(sig)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function cleanBotReads(email) {
+  if (!email || !Array.isArray(email.reads)) return email;
+
+  const validReads = email.reads.filter(r => !isBotOrPrefetch(r.userAgent));
+  if (validReads.length !== email.reads.length) {
+    email.reads = validReads;
+    email.openCount = validReads.length;
+    if (validReads.length === 0) {
+      email.isRead = false;
+      email.firstReadAt = null;
+      email.firstReadAtFormatted = null;
+      email.lastReadAt = null;
+      email.lastReadAtFormatted = null;
+    } else {
+      email.isRead = true;
+      email.firstReadAt = validReads[0].timestamp;
+      email.firstReadAtFormatted = validReads[0].formatted;
+      email.lastReadAt = validReads[validReads.length - 1].timestamp;
+      email.lastReadAtFormatted = validReads[validReads.length - 1].formatted;
+    }
+  }
+  return email;
+}
+
 function formatTimestamp(isoString) {
   if (!isoString) return '';
   const date = new Date(isoString);
@@ -138,8 +206,16 @@ const db = {
 
   // Record an open event when tracking pixel is fetched
   async recordOpen(id, clientInfo = {}) {
-    let target = null;
+    const userAgent = clientInfo.userAgent || '';
+    const headers = clientInfo.headers || {};
 
+    // 1. Detect and filter out automated bots, security scanners, and prefetch crawlers
+    if (isBotOrPrefetch(userAgent, headers)) {
+      console.log(`[BOT / PREFETCH IGNORED] Email ID: ${id} | UA: ${userAgent}`);
+      return null;
+    }
+
+    let target = null;
     if (redis) {
       try {
         const val = await redis.hget(REDIS_KEY, id);
@@ -157,7 +233,7 @@ const db = {
 
     const now = new Date().toISOString();
     const formatted = formatTimestamp(now);
-    const clientType = parseUserAgent(clientInfo.userAgent);
+    const clientType = parseUserAgent(userAgent);
 
     if (!target) {
       target = {
@@ -200,7 +276,7 @@ const db = {
       timestamp: now,
       formatted: formatted,
       ip: clientInfo.ip || 'Unknown IP',
-      userAgent: clientInfo.userAgent || 'Unknown',
+      userAgent: userAgent || 'Unknown',
       clientType: clientType
     });
 
@@ -220,15 +296,22 @@ const db = {
   },
 
   async getEmail(id) {
+    let target = null;
     if (redis) {
       try {
         const val = await redis.hget(REDIS_KEY, id);
         if (val) {
-          return typeof val === 'string' ? JSON.parse(val) : val;
+          target = typeof val === 'string' ? JSON.parse(val) : val;
         }
       } catch (e) {}
     }
-    return emailsCache[id] || null;
+    if (!target) {
+      target = emailsCache[id] || null;
+    }
+    if (target) {
+      target = cleanBotReads(target);
+    }
+    return target;
   },
 
   async getAllEmails() {
@@ -239,7 +322,13 @@ const db = {
           const list = [];
           for (const key in all) {
             try {
-              const val = typeof all[key] === 'string' ? JSON.parse(all[key]) : all[key];
+              let val = typeof all[key] === 'string' ? JSON.parse(all[key]) : all[key];
+              const prevRead = val.isRead;
+              val = cleanBotReads(val);
+              if (prevRead !== val.isRead) {
+                // Retroactively persist cleaned email back to Redis
+                redis.hset(REDIS_KEY, { [key]: JSON.stringify(val) }).catch(() => {});
+              }
               list.push(val);
             } catch (e) {}
           }
@@ -249,7 +338,7 @@ const db = {
         console.error('[Redis getAllEmails Error]', err);
       }
     }
-    return Object.values(emailsCache).sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    return Object.values(emailsCache).map(cleanBotReads).sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
   },
 
   async deleteEmail(id) {

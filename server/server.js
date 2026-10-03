@@ -37,7 +37,8 @@ const handlePixel = async (req, res) => {
   try {
     await db.recordOpen(emailId, {
       ip: clientIp,
-      userAgent: userAgent
+      userAgent: userAgent,
+      headers: req.headers
     });
   } catch (err) {
     console.error('[Pixel Error]', err);
