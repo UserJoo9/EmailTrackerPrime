@@ -397,45 +397,55 @@
         const rowSubject = cleanSubject(subjectSpan ? subjectSpan.textContent : '');
         const rowRecipText = (recipCell ? recipCell.textContent : '').toLowerCase().trim();
 
+        const existing = row.querySelector('.et-mailtrack-checks');
         let matchedEmail = null;
 
-        // Pass 1: Strict match (Subject + Recipient) on unused tracked emails
-        for (const item of trackedEmails) {
-          if (usedEmailIds.has(item.id)) continue;
-          const itemSubject = cleanSubject(item.subject);
-          const itemRecip = (item.recipient || '').toLowerCase().trim();
-          const recipUser = itemRecip.split('@')[0];
-
-          const subjMatch = itemSubject && rowSubject && (
-            rowSubject === itemSubject || 
-            rowSubject.includes(itemSubject) || 
-            itemSubject.includes(rowSubject)
-          );
-          const recipMatch = recipUser && rowRecipText && (
-            rowRecipText.includes(recipUser) || 
-            rowRecipText.includes(itemRecip)
-          );
-
-          if (subjMatch && recipMatch) {
-            matchedEmail = item;
-            break;
+        // 1. Sticky matching: If this row already has our badge, stick with that exact email ID if it still matches!
+        if (existing && existing.dataset.emailId) {
+          const currentId = existing.dataset.emailId;
+          const found = trackedEmails.find(e => e.id === currentId);
+          if (found && !usedEmailIds.has(currentId)) {
+            const itemRecip = (found.recipient || '').toLowerCase().trim();
+            const recipUser = itemRecip.split('@')[0];
+            const recipMatch = recipUser && rowRecipText && (
+              rowRecipText.includes(recipUser) || rowRecipText.includes(itemRecip)
+            );
+            if (recipMatch) {
+              matchedEmail = found;
+            }
           }
         }
 
-        // Pass 2: Subject-only match on unused tracked emails
+        // 2. Strict matching (Recipient MUST match! We never match an email sent to a different recipient):
         if (!matchedEmail) {
           for (const item of trackedEmails) {
             if (usedEmailIds.has(item.id)) continue;
             const itemSubject = cleanSubject(item.subject);
-            if (itemSubject && rowSubject && (rowSubject === itemSubject || rowSubject.includes(itemSubject) || itemSubject.includes(rowSubject))) {
+            const itemRecip = (item.recipient || '').toLowerCase().trim();
+            const recipUser = itemRecip.split('@')[0];
+
+            // STRICT: Must match recipient!
+            const recipMatch = recipUser && rowRecipText && (
+              rowRecipText.includes(recipUser) || 
+              rowRecipText.includes(itemRecip)
+            );
+
+            if (!recipMatch) continue;
+
+            const subjMatch = itemSubject && rowSubject && (
+              rowSubject === itemSubject || 
+              rowSubject.includes(itemSubject) || 
+              itemSubject.includes(rowSubject)
+            );
+
+            if (subjMatch) {
               matchedEmail = item;
               break;
             }
           }
         }
 
-        const existing = row.querySelector('.et-mailtrack-checks');
-
+        // If this row does not match any tracked email, remove badge and exit
         if (!matchedEmail) {
           if (existing) existing.remove();
           return;
@@ -447,7 +457,7 @@
         if (!targetContainer) return;
 
         if (existing) {
-          // If badge already exists for this exact email, update status smoothly without removing DOM element
+          // If badge already exists for this exact email, update status in-place without removing DOM node
           if (existing.dataset.emailId === matchedEmail.id) {
             const isReadStr = String(matchedEmail.isRead);
             if (existing.dataset.isRead !== isReadStr) {
