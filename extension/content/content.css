@@ -1,0 +1,257 @@
+/* EmailTracker Prime - Gmail Content Styles */
+
+/* Compose Toolbar Button */
+.et-track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin-right: 8px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  border: 1px solid transparent;
+}
+
+.et-track-btn.et-active {
+  background-color: #e8f5e9;
+  color: #1b5e20;
+  border-color: #a5d6a7;
+}
+
+.et-track-btn.et-inactive {
+  background-color: #f1f3f4;
+  color: #5f6368;
+  border-color: #dadce0;
+}
+
+.et-track-btn:hover {
+  filter: brightness(0.95);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.et-track-icon {
+  font-size: 14px;
+  display: inline-block;
+}
+
+/* Gmail List Row Badges */
+.et-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  margin-right: 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  white-space: nowrap;
+  vertical-align: middle;
+  line-height: 1.3;
+  z-index: 5;
+}
+
+.et-badge:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Unread Badge (Sent, not yet opened) */
+.et-badge.et-unread {
+  background: #f1f3f4;
+  color: #5f6368;
+  border: 1px solid #dadce0;
+}
+
+/* Read Badge (Opened by recipient) */
+.et-badge.et-read {
+  background: #e6f4ea;
+  color: #137333;
+  border: 1px solid #ceead6;
+  animation: et-pulse 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes et-pulse {
+  from {
+    box-shadow: 0 0 2px rgba(30, 142, 62, 0.2);
+  }
+  to {
+    box-shadow: 0 0 6px rgba(30, 142, 62, 0.4);
+  }
+}
+
+.et-badge-check {
+  font-size: 12px;
+  letter-spacing: -2px;
+  font-weight: 900;
+}
+
+.et-badge-count {
+  font-size: 10px;
+  background: rgba(19, 115, 51, 0.15);
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 2px;
+}
+
+/* Floating Notification Toast in Gmail */
+.et-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background: #202124;
+  color: #ffffff;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 10000;
+  animation: et-slide-in 0.3s ease;
+  direction: rtl;
+}
+
+@keyframes et-slide-in {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Detailed Modal Popover when clicking a badge in Gmail */
+.et-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  animation: et-fade-in 0.2s ease;
+}
+
+@keyframes et-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.et-modal-card {
+  background: #ffffff;
+  width: 480px;
+  max-width: 90vw;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  overflow: hidden;
+  direction: rtl;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  animation: et-scale-up 0.2s ease;
+}
+
+@keyframes et-scale-up {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.et-modal-header {
+  padding: 16px 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e8eaed;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.et-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #202124;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.et-modal-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #5f6368;
+  padding: 4px 8px;
+  border-radius: 50%;
+  line-height: 1;
+}
+
+.et-modal-close:hover {
+  background: #e8eaed;
+}
+
+.et-modal-body {
+  padding: 20px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.et-info-row {
+  margin-bottom: 14px;
+}
+
+.et-info-label {
+  font-size: 12px;
+  color: #5f6368;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.et-info-val {
+  font-size: 14px;
+  color: #202124;
+  font-weight: 500;
+}
+
+.et-reads-timeline {
+  margin-top: 18px;
+  border-top: 1px solid #f1f3f4;
+  padding-top: 14px;
+}
+
+.et-reads-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #202124;
+  margin-bottom: 10px;
+}
+
+.et-read-entry {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-right: 3px solid #1a73e8;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.et-read-client {
+  color: #5f6368;
+  font-size: 11px;
+}

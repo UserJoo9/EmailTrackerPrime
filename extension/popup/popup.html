@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmailTracker Prime</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="brand-icon">✓✓</span>
+        <div class="brand-info">
+          <h1>EmailTracker</h1>
+          <span class="brand-sub">تتبع قراءة الإيميل</span>
+        </div>
+      </div>
+      <div id="connection-status" class="status-pill status-connecting" title="حالة الاتصال بالخادم">
+        <span class="status-dot"></span>
+        <span class="status-text">جاري الاتصال...</span>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="tab-emails">
+        <span class="tab-icon">✉️</span>
+        <span>الإيميلات</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-stats">
+        <span class="tab-icon">📊</span>
+        <span>الإحصائيات</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-settings">
+        <span class="tab-icon">⚙️</span>
+        <span>الإعدادات</span>
+      </button>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+
+      <!-- TAB 1: EMAILS LIST -->
+      <section id="tab-emails" class="tab-pane active">
+        <!-- Search & Filter -->
+        <div class="filters-bar">
+          <input type="text" id="search-input" placeholder="بحث بالمستلم أو الموضوع..." class="search-input">
+          <div class="filter-pills">
+            <button class="filter-pill active" data-filter="all">الكل</button>
+            <button class="filter-pill" data-filter="read">مقروءة</button>
+            <button class="filter-pill" data-filter="unread">لم تُقرأ</button>
+          </div>
+        </div>
+
+        <!-- Emails List Container -->
+        <div id="emails-list" class="emails-list">
+          <div class="empty-state">
+            <span class="empty-icon">⏳</span>
+            <p>جاري تحميل الإيميلات المتتبعة...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: STATS -->
+      <section id="tab-stats" class="tab-pane">
+        <div class="stats-grid">
+          <div class="stat-box stat-sent">
+            <div class="stat-number" id="stat-total-sent">0</div>
+            <div class="stat-title">إجمالي المرسل</div>
+          </div>
+          <div class="stat-box stat-read">
+            <div class="stat-number" id="stat-total-read">0</div>
+            <div class="stat-title">تمت قراءتها</div>
+          </div>
+          <div class="stat-box stat-unread">
+            <div class="stat-number" id="stat-total-unread">0</div>
+            <div class="stat-title">لم تُقرأ بعد</div>
+          </div>
+          <div class="stat-box stat-rate">
+            <div class="stat-number" id="stat-open-rate">0%</div>
+            <div class="stat-title">نسبة القراءة</div>
+          </div>
+        </div>
+
+        <div class="stats-card">
+          <h3>💡 نصائح زيادة معدل فتح الإيميلات:</h3>
+          <ul>
+            <li>اكتب عنوان إيميل واضح ومختصر (أقل من 50 حرف).</li>
+            <li>أرسل إيميلاتك في أوقات دوام العمل (9:00 صباحاً - 11:30 صباحاً).</li>
+            <li>تجنب الكلمات التي ترفع تصنيف الرسالة كـ Spam مثل "عرض عاجل جداً".</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- TAB 3: SETTINGS -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="settings-form">
+          <div class="form-group">
+            <label for="setting-server-url">رابط خادم التتبع (Server URL):</label>
+            <div class="input-with-btn">
+              <input type="url" id="setting-server-url" value="http://localhost:3000" placeholder="http://localhost:3000 أو رابط Ngrok">
+              <button id="btn-test-server" class="btn-secondary" title="اختبار الاتصال بالخادم">فحص</button>
+            </div>
+            <small class="form-hint">عند العمل على الإنترنت، يمكنك استخدام رابط نفق مثل Ngrok أو نشر الخادم على Render / Railway مجاناً.</small>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-track-default" checked>
+              <span>تفعيل تتبع قراءة الإيميل تلقائياً عند إنشاء أي رسالة جديدة</span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-show-badges" checked>
+              <span>إظهار علامة القراءة (✓✓) في قائمة إيميلات Gmail مباشرة</span>
+            </label>
+          </div>
+
+          <button id="btn-save-settings" class="btn-primary">حفظ الإعدادات</button>
+          <div id="settings-status-msg" class="settings-msg"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>EmailTracker Prime v1.0</span>
+      <a href="http://localhost:3000" target="_blank" id="open-web-dashboard">فتح لوحة الويب ↗</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
