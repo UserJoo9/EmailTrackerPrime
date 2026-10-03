@@ -477,6 +477,17 @@
     });
   }
 
+  // Neutralize any tracking pixels rendered in the sender's own view (Sent messages view)
+  function neutralizeSelfPixels() {
+    const pixels = document.querySelectorAll('img[src*="/track/pixel/"]');
+    pixels.forEach(p => {
+      // Only neutralize if it is rendered in an existing message, not while actively composing
+      if (!p.closest('[contenteditable="true"]')) {
+        p.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+      }
+    });
+  }
+
   // --------------------------------------------------------------------------
   // 5. OBSERVER & PERIODIC REFRESH
   // --------------------------------------------------------------------------
@@ -485,6 +496,7 @@
   const observer = new MutationObserver(() => {
     if (debounceTimeout) clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
+      neutralizeSelfPixels();
       decorateGmailRows();
       decorateThreadMessages();
     }, 250);
