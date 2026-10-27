@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { createApp } = require('../src/app');
+const { createApp } = require('../src/create-app');
 const { createMemoryStore } = require('../src/store/memoryStore');
 const { loadConfig } = require('../src/config');
 

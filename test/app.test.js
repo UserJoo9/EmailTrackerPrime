@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createApp } = require('../src/app');
+const { createApp } = require('../src/create-app');
 const { createMemoryStore } = require('../src/store/memoryStore');
 const { loadConfig } = require('../src/config');
 

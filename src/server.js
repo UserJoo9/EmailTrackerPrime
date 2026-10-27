@@ -2,7 +2,7 @@
 
 const { loadConfig } = require('./config');
 const { createStore } = require('./store');
-const { createApp } = require('./app');
+const { createApp } = require('./create-app');
 
 const config = loadConfig();
 const app = createApp({ config, store: createStore(config) });
