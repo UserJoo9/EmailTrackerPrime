@@ -584,3 +584,17 @@ body.dark-theme .email-card:hover {
 .app-footer a:hover {
   text-decoration: underline;
 }
+
+/* حقل مفتاح الـ API (نفس شكل حقل الرابط) */
+#setting-api-key {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+#setting-api-key:focus { border-color: var(--primary); }

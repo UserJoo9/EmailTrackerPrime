@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>EmailTracker Prime | لوحة المتابعة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <!-- تسجيل الدخول بمفتاح الـ API -->
+  <div id="login" class="login-card hidden">
+    <h1>EmailTracker Prime</h1>
+    <p>أدخل مفتاح الـ API (نفس قيمة <code>API_KEY</code> المضبوطة على السيرفر).</p>
+    <input id="key-input" type="password" placeholder="API key" autocomplete="off">
+    <button id="login-btn" class="refresh-btn">دخول</button>
+    <div id="login-error" class="error-msg"></div>
+  </div>
+
+  <div id="app" class="container hidden">
+    <header>
+      <div class="brand">
+        <div class="brand-logo">✓✓</div>
+        <div class="brand-text">
+          <h1>EmailTracker Prime</h1>
+          <p>تتبع فتح وقراءة رسائل البريد الإلكتروني</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="clear-btn" class="refresh-btn danger">🗑️ <span>مسح السجل</span></button>
+        <button id="refresh-btn" class="refresh-btn">🔄 <span>تحديث</span></button>
+        <button id="logout-btn" class="refresh-btn">خروج</button>
+      </div>
+    </header>
+
+    <div class="metrics-grid">
+      <div class="metric-card"><div class="metric-header"><span class="metric-title">إجمالي المرسل</span><span class="metric-icon">✉️</span></div><div id="m-sent" class="metric-value val-sent">0</div></div>
+      <div class="metric-card"><div class="metric-header"><span class="metric-title">تمت قراءتها</span><span class="metric-icon">🟢</span></div><div id="m-read" class="metric-value val-read">0</div></div>
+      <div class="metric-card"><div class="metric-header"><span class="metric-title">في الانتظار</span><span class="metric-icon">⏳</span></div><div id="m-unread" class="metric-value val-unread">0</div></div>
+      <div class="metric-card"><div class="metric-header"><span class="metric-title">معدل الفتح</span><span class="metric-icon">📊</span></div><div id="m-rate" class="metric-value val-rate">0%</div></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header"><div class="section-title"><span>📋</span><span>سجل الإيميلات المتتبعة</span></div></div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>الحالة</th><th>المستلم</th><th>الموضوع</th><th>وقت الإرسال</th><th>أول فتح</th><th>مرات الفتح</th><th></th></tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div id="empty" class="empty-state hidden"><span class="empty-icon">📭</span><p>لا توجد إيميلات متتبعة بعد.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>

@@ -1,9 +1,12 @@
 {
   "version": 2,
+  "functions": {
+    "api/index.js": { "includeFiles": "public/**" }
+  },
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index.js"
-    }
+    { "source": "/api/:path*", "destination": "/api/index.js" },
+    { "source": "/track/:path*", "destination": "/api/index.js" },
+    { "source": "/pixel/:path*", "destination": "/api/index.js" },
+    { "source": "/healthz", "destination": "/api/index.js" }
   ]
 }

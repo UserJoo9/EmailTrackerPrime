@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "EmailTracker Prime - تتبع قراءة الإيميل",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "تتبع فتح وقراءة رسائل البريد الإلكتروني في Gmail مع إشعارات القراءة وتوقيت الفتح بدقة.",
   "permissions": [
     "storage",
@@ -9,8 +9,12 @@
   ],
   "host_permissions": [
     "https://mail.google.com/*",
-    "http://localhost:*/*",
-    "https://*/*"
+    "https://email-tracker-prime.vercel.app/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -30,6 +34,7 @@
         "https://mail.google.com/*"
       ],
       "js": [
+        "shared/util.js",
         "content/content.js"
       ],
       "css": [
@@ -42,15 +47,5 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "icons/*"
-      ],
-      "matches": [
-        "https://mail.google.com/*"
-      ]
-    }
-  ]
+  }
 }

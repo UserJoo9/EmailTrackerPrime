@@ -1,6 +1,8 @@
-// EmailTracker Prime - Popup Controller (with Dark Mode & Custom Timezone Support)
+// EmailTracker Prime - Popup Controller
+// كل الاتصال بالسيرفر والكاش عن طريق الـ background (مفيش fetch ولا كتابة كاش من هنا).
 
 document.addEventListener('DOMContentLoaded', () => {
+  const { DEFAULT_SERVER_URL, el, normalizeUrl } = ETP;
   let allEmails = [];
   let currentFilter = 'all';
   let searchQuery = '';
@@ -22,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statRate = document.getElementById('stat-open-rate');
 
   const serverUrlInput = document.getElementById('setting-server-url');
+  const apiKeyInput = document.getElementById('setting-api-key');
   const timezoneSelect = document.getElementById('setting-timezone');
   const themeSelect = document.getElementById('setting-theme');
   const themeToggleBtn = document.getElementById('theme-toggle-btn');
@@ -80,26 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // -------------------------------------------------------------
 
   function formatTimestampInTz(isoString) {
-    if (!isoString) return '';
-    try {
-      const date = new Date(isoString);
-      const tz = selectedTimezone === 'auto' 
-        ? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Cairo') 
-        : selectedTimezone;
-
-      return date.toLocaleString('ar-EG', {
-        timeZone: tz,
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-    } catch (err) {
-      return new Date(isoString).toLocaleString('ar-EG');
-    }
+    return ETP.formatTime(isoString, selectedTimezone);
   }
 
   if (timezoneSelect) {
@@ -148,31 +132,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // 4. SERVER HEALTH & AUTO SYNC
   // -------------------------------------------------------------
 
-  function checkServerHealth() {
-    chrome.runtime.sendMessage({ type: 'CHECK_SERVER' }, (res) => {
-      if (res && res.reachable) {
-        statusPill.className = 'status-pill status-connected';
-        statusText.textContent = 'متصل بالسيرفر';
-        syncEmailsToServer();
-      } else {
-        statusPill.className = 'status-pill status-disconnected';
-        statusText.textContent = 'غير متصل';
-      }
-    });
+  function setStatus(cls, text) {
+    statusPill.className = `status-pill ${cls}`;
+    statusText.textContent = text;
   }
 
-  function syncEmailsToServer() {
-    chrome.storage.local.get(['cachedEmails', 'serverUrl'], (data) => {
-      if (Array.isArray(data.cachedEmails) && data.cachedEmails.length > 0 && data.serverUrl) {
-        fetch(`${data.serverUrl.replace(/\/+$/, '')}/api/emails/sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ emails: data.cachedEmails })
-        }).then(r => r.json()).then(res => {
-          if (res && res.success) {
-            loadEmails();
-          }
-        }).catch(() => {});
+  function checkServerHealth() {
+    chrome.runtime.sendMessage({ type: 'CHECK_SERVER' }, (res) => {
+      void chrome.runtime.lastError;
+      if (res && res.reachable && res.authorized) {
+        setStatus('status-connected', 'متصل بالسيرفر');
+        loadEmails({ force: true }); // بيزامن الناقص ويحدّث
+      } else if (res && res.reachable) {
+        setStatus('status-disconnected', 'مفتاح API غير صحيح');
+      } else {
+        setStatus('status-disconnected', 'غير متصل');
       }
     });
   }
@@ -181,91 +155,74 @@ document.addEventListener('DOMContentLoaded', () => {
   // 5. LOAD & RENDER EMAILS
   // -------------------------------------------------------------
 
-  function loadEmails() {
-    chrome.runtime.sendMessage({ type: 'GET_EMAILS' }, (res) => {
+  function loadEmails({ force = false } = {}) {
+    chrome.runtime.sendMessage({ type: 'GET_EMAILS', force }, (res) => {
+      void chrome.runtime.lastError;
       if (res && res.success && Array.isArray(res.emails)) {
         allEmails = res.emails;
-        chrome.storage.local.set({ cachedEmails: allEmails });
         renderEmails();
         loadStats();
-      } else {
-        chrome.storage.local.get(['cachedEmails'], (data) => {
-          if (Array.isArray(data.cachedEmails)) {
-            allEmails = data.cachedEmails;
-            renderEmails();
-          }
-        });
       }
     });
   }
 
+  function emptyState(icon, html) {
+    const p = el('p');
+    html.forEach((part, i) => {
+      if (i > 0) p.appendChild(document.createElement('br'));
+      p.appendChild(document.createTextNode(part));
+    });
+    return el('div', { class: 'empty-state' }, el('span', { class: 'empty-icon', text: icon }), p);
+  }
+
+  function renderCard(email) {
+    const isRead = email.isRead;
+    const meta = el('div', { class: 'card-meta' },
+      el('div', { class: 'meta-row' }, el('span', { text: 'الإرسال:' }), el('span', { text: formatTimestampInTz(email.sentAt) }))
+    );
+    if (isRead) {
+      meta.appendChild(el('div', { class: 'meta-row' },
+        el('span', { class: 'meta-open', text: '🟢 فتح في:' }),
+        el('span', { class: 'meta-open', text: formatTimestampInTz(email.firstReadAt) })));
+      meta.appendChild(el('div', { class: 'meta-row' },
+        el('span', { text: 'مرات الفتح:' }),
+        el('span', { class: 'meta-count', text: `${email.openCount} مرة` })));
+    } else {
+      const row = el('div', { class: 'meta-row' }, el('span', { text: 'الحالة:' }), el('span', { text: 'لم يُفتح بعد' }));
+      row.style.color = 'var(--text-muted)';
+      meta.appendChild(row);
+    }
+
+    return el('div', { class: `email-card ${isRead ? 'is-read' : 'is-unread'}` },
+      el('div', { class: 'card-header' },
+        el('div', { class: 'card-recip', title: email.recipient },
+          document.createTextNode(email.recipient),
+          email.isFollowUp ? el('span', { class: 'chip-followup', text: 'متابعة / رد' }) : null),
+        el('span', { class: `card-chip ${isRead ? 'chip-read' : 'chip-pending'}` },
+          el('span', { text: isRead ? '✓✓ مقروء' : '✓ مرسل' }))),
+      el('div', { class: 'card-subject', title: email.subject }, document.createTextNode(email.subject || '(بدون عنوان)')),
+      meta
+    );
+  }
+
   function renderEmails() {
-    let filtered = allEmails.filter(email => {
+    const filtered = allEmails.filter((email) => {
       if (currentFilter === 'read' && !email.isRead) return false;
       if (currentFilter === 'unread' && email.isRead) return false;
-
       if (searchQuery) {
-        const matchRecip = (email.recipient || '').toLowerCase().includes(searchQuery);
-        const matchSubj = (email.subject || '').toLowerCase().includes(searchQuery);
-        return matchRecip || matchSubj;
+        return (email.recipient || '').toLowerCase().includes(searchQuery) ||
+               (email.subject || '').toLowerCase().includes(searchQuery);
       }
       return true;
     });
 
     if (filtered.length === 0) {
-      emailsList.innerHTML = `
-        <div class="empty-state">
-          <span class="empty-icon">📭</span>
-          <p>${allEmails.length === 0 ? 'لا توجد إيميلات متتبعة بعد.<br>أرسل إيميلك من بريد Gmail وسيتم تتبعه فوراً!' : 'لا توجد نتائج تطابق بحثك.'}</p>
-        </div>
-      `;
+      emailsList.replaceChildren(allEmails.length === 0
+        ? emptyState('📭', ['لا توجد إيميلات متتبعة بعد.', 'أرسل إيميلك من بريد Gmail وسيتم تتبعه فوراً!'])
+        : emptyState('📭', ['لا توجد نتائج تطابق بحثك.']));
       return;
     }
-
-    emailsList.innerHTML = filtered.map(email => {
-      const isRead = email.isRead;
-      const sentStr = formatTimestampInTz(email.sentAt);
-      const openStr = email.firstReadAt ? formatTimestampInTz(email.firstReadAt) : null;
-
-      return `
-        <div class="email-card ${isRead ? 'is-read' : 'is-unread'}">
-          <div class="card-header">
-            <div class="card-recip" title="${email.recipient}">
-              ${email.recipient}
-              ${email.isFollowUp ? '<span class="chip-followup">متابعة / رد</span>' : ''}
-            </div>
-            <span class="card-chip ${isRead ? 'chip-read' : 'chip-pending'}">
-              <span>${isRead ? '✓✓ مقروء' : '✓ مرسل'}</span>
-            </span>
-          </div>
-
-          <div class="card-subject" title="${email.subject}">${email.subject || '(بدون عنوان)'}</div>
-
-          <div class="card-meta">
-            <div class="meta-row">
-              <span>الإرسال:</span>
-              <span>${sentStr}</span>
-            </div>
-
-            ${isRead ? `
-              <div class="meta-row">
-                <span class="meta-open">🟢 فتح في:</span>
-                <span class="meta-open">${openStr}</span>
-              </div>
-              <div class="meta-row">
-                <span>مرات الفتح:</span>
-                <span class="meta-count">${email.openCount} مرة</span>
-              </div>
-            ` : `
-              <div class="meta-row" style="color: var(--text-muted);">
-                <span>الحالة:</span>
-                <span>لم يُفتح بعد</span>
-              </div>
-            `}
-          </div>
-        </div>
-      `;
-    }).join('');
+    emailsList.replaceChildren(...filtered.map(renderCard));
   }
 
   // -------------------------------------------------------------
@@ -295,97 +252,111 @@ document.addEventListener('DOMContentLoaded', () => {
   // 7. SETTINGS & ACTIONS
   // -------------------------------------------------------------
 
-  chrome.storage.local.get(['serverUrl', 'timezone', 'theme'], (data) => {
-    const defaultUrl = 'https://email-tracker-prime.vercel.app';
-    const effectiveUrl = (data.serverUrl && !data.serverUrl.includes('localhost:3000')) ? data.serverUrl : defaultUrl;
+  chrome.storage.local.get(['serverUrl', 'apiKey', 'timezone', 'theme'], (data) => {
+    const effectiveUrl = normalizeUrl(data.serverUrl || DEFAULT_SERVER_URL);
     serverUrlInput.value = effectiveUrl;
+    if (apiKeyInput) apiKeyInput.value = data.apiKey || '';
     if (openWebDashboard) openWebDashboard.href = effectiveUrl;
-    if (!data.serverUrl || data.serverUrl.includes('localhost:3000')) {
-      chrome.storage.local.set({ serverUrl: defaultUrl });
-    }
     if (data.timezone) {
       selectedTimezone = data.timezone;
       if (timezoneSelect) timezoneSelect.value = data.timezone;
     }
-    applyTheme(data.theme || 'dark'); // Default to sleek dark mode
+    applyTheme(data.theme || 'dark');
   });
 
-  btnTestServer.addEventListener('click', () => {
+  function flashButton(btn, text, color) {
+    const original = btn.dataset.label || btn.textContent;
+    btn.dataset.label = original;
+    btn.textContent = text;
+    btn.style.color = color || '';
+    setTimeout(() => { btn.textContent = original; btn.style.color = ''; }, 2000);
+  }
+
+  function showSettingsMessage(kind, text) {
+    settingsMsg.className = `settings-msg ${kind}`;
+    settingsMsg.textContent = text;
+    setTimeout(() => { settingsMsg.textContent = ''; }, 3000);
+  }
+
+  // لو السيرفر مش الافتراضي لازم نطلب صلاحية الوصول له (optional_host_permissions)
+  async function ensureHostPermission(url) {
+    let origin;
+    try { origin = new URL(url).origin + '/*'; } catch { return false; }
+    if (origin === new URL(DEFAULT_SERVER_URL).origin + '/*') return true;
+    const has = await chrome.permissions.contains({ origins: [origin] });
+    return has || chrome.permissions.request({ origins: [origin] });
+  }
+
+  btnTestServer.addEventListener('click', async () => {
     btnTestServer.textContent = '...';
-    const testUrl = serverUrlInput.value.trim().replace(/\/+$/, '');
-
-    fetch(`${testUrl}/api/stats`)
-      .then(res => res.json())
-      .then(() => {
-        btnTestServer.textContent = 'ناجح ✓';
-        btnTestServer.style.color = 'var(--emerald)';
-        setTimeout(() => {
-          btnTestServer.textContent = 'فحص';
-          btnTestServer.style.color = '';
-        }, 2000);
-      })
-      .catch(() => {
-        btnTestServer.textContent = 'فشل ✗';
-        btnTestServer.style.color = 'var(--rose)';
-        setTimeout(() => {
-          btnTestServer.textContent = 'فحص';
-          btnTestServer.style.color = '';
-        }, 2000);
-      });
+    const url = normalizeUrl(serverUrlInput.value);
+    if (!(await ensureHostPermission(url))) {
+      flashButton(btnTestServer, 'مرفوض ✗', 'var(--rose)');
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: 'CHECK_SERVER',
+      settings: { serverUrl: url, apiKey: apiKeyInput ? apiKeyInput.value : '' }
+    }, (res) => {
+      void chrome.runtime.lastError;
+      if (res && res.reachable && res.authorized) flashButton(btnTestServer, 'ناجح ✓', 'var(--emerald)');
+      else if (res && res.reachable) flashButton(btnTestServer, 'مفتاح خطأ ✗', 'var(--rose)');
+      else flashButton(btnTestServer, 'فشل ✗', 'var(--rose)');
+    });
   });
 
-  btnSaveSettings.addEventListener('click', () => {
-    const url = serverUrlInput.value.trim().replace(/\/+$/, '');
-    const tz = timezoneSelect.value;
-    const th = themeSelect.value;
-
-    selectedTimezone = tz;
-    applyTheme(th);
+  btnSaveSettings.addEventListener('click', async () => {
+    const url = normalizeUrl(serverUrlInput.value) || DEFAULT_SERVER_URL;
+    if (!(await ensureHostPermission(url))) {
+      showSettingsMessage('error', 'لازم توافق على صلاحية الوصول للسيرفر عشان نحفظ الرابط.');
+      return;
+    }
+    selectedTimezone = timezoneSelect.value;
+    applyTheme(themeSelect.value);
 
     chrome.storage.local.set({
       serverUrl: url,
-      timezone: tz,
-      theme: th
+      apiKey: apiKeyInput ? apiKeyInput.value.trim() : '',
+      timezone: selectedTimezone,
+      theme: themeSelect.value
     }, () => {
-      settingsMsg.className = 'settings-msg success';
-      settingsMsg.textContent = 'تم حفظ الإعدادات بنجاح!';
+      showSettingsMessage('success', 'تم حفظ الإعدادات بنجاح!');
       if (openWebDashboard) openWebDashboard.href = url;
       checkServerHealth();
       renderEmails();
-      setTimeout(() => { settingsMsg.textContent = ''; }, 2500);
     });
   });
 
   if (btnSyncNow) {
     btnSyncNow.addEventListener('click', () => {
       btnSyncNow.textContent = 'جاري المزامنة...';
-      syncEmailsToServer();
-      setTimeout(() => {
-        btnSyncNow.textContent = 'تمت المزامنة بنجاح ✓';
-        setTimeout(() => {
-          btnSyncNow.textContent = '🔄 مزامنة البيانات مع السيرفر الآن';
-        }, 2000);
-      }, 1000);
+      chrome.runtime.sendMessage({ type: 'GET_EMAILS', force: true }, (res) => {
+        void chrome.runtime.lastError;
+        if (res && res.success) {
+          allEmails = res.emails;
+          renderEmails();
+          loadStats();
+        }
+        flashButton(btnSyncNow, 'تمت المزامنة ✓');
+        btnSyncNow.dataset.label = '🔄 مزامنة البيانات مع السيرفر الآن';
+      });
     });
   }
 
   if (btnClearAll) {
     btnClearAll.addEventListener('click', () => {
-      if (confirm('هل تريد مسح جميع الإيميلات المسجلة والبدء من جديد؟')) {
-        chrome.storage.local.set({ cachedEmails: [] }, () => {
-          chrome.storage.local.get(['serverUrl'], (data) => {
-            if (data.serverUrl) {
-              fetch(`${data.serverUrl.replace(/\/+$/, '')}/api/emails/clear`, { method: 'POST' }).catch(() => {});
-            }
-          });
+      if (!confirm('هل تريد مسح جميع الإيميلات المسجلة (من السيرفر ومن الإضافة)؟ لا يمكن التراجع.')) return;
+      chrome.runtime.sendMessage({ type: 'CLEAR_ALL' }, (res) => {
+        void chrome.runtime.lastError;
+        if (res && res.success) {
           allEmails = [];
           renderEmails();
           loadStats();
-          settingsMsg.className = 'settings-msg success';
-          settingsMsg.textContent = 'تم مسح السجلات بنجاح!';
-          setTimeout(() => { settingsMsg.textContent = ''; }, 2000);
-        });
-      }
+          showSettingsMessage('success', 'تم مسح السجلات بنجاح!');
+        } else {
+          showSettingsMessage('error', res && res.error === 'unauthorized' ? 'مفتاح API غير صحيح: لم يتم المسح.' : 'تعذّر الاتصال بالسيرفر: لم يتم المسح.');
+        }
+      });
     });
   }
 

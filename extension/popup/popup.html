@@ -132,6 +132,12 @@
             <small class="hint">رابط خادم Vercel الذي يعمل عليه التتبع 24/7.</small>
           </div>
 
+          <div class="form-group">
+            <label for="setting-api-key">مفتاح الـ API (API Key):</label>
+            <input type="password" id="setting-api-key" placeholder="نفس قيمة API_KEY على السيرفر" autocomplete="off">
+            <small class="hint">مطلوب للوصول لسجل الإيميلات. ضعه في متغيرات البيئة على Vercel بنفس الاسم API_KEY.</small>
+          </div>
+
           <button id="btn-sync-now" class="btn-sub" style="width: 100%; margin-top: 4px;">🔄 مزامنة البيانات مع السيرفر الآن</button>
           <button id="btn-clear-all" class="btn-sub" style="width: 100%; margin-top: 6px; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">🗑️ مسح جميع السجلات (بدء من جديد)</button>
 
@@ -149,6 +155,7 @@
     </footer>
   </div>
 
+  <script src="../shared/util.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
