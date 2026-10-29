@@ -85,6 +85,34 @@ for (const [name, make] of Object.entries(factories)) {
     assert.deepEqual(await s.getStats(), { totalSent: 0, totalRead: 0 });
     assert.deepEqual(await s.listEmails(), []);
   });
+
+  test(`[${name}] self-view: بيلغي الفتح الوهمي الأخير ويتجاهل اللي بعده، ويسيب القديم`, async () => {
+    const s = make();
+    await s.saveEmail(rec('et_selfview1'));
+    await s.recordOpen('et_selfview1', hit, { now: later(60) });   // فتح حقيقي قديم
+    await s.recordOpen('et_selfview1', hit, { now: later(95) });   // الراسل شاف رسالته
+    const r = await s.markSelfView('et_selfview1', { windowMs: 30000, now: later(100) });
+    assert.deepEqual(r, { found: true, discarded: 1 });
+    assert.equal((await s.recordOpen('et_selfview1', hit, { now: later(110) })).reason, 'self-view');
+    const e = await s.getEmail('et_selfview1');
+    assert.equal(e.openCount, 1);
+    assert.equal(e.reads.length, 1);
+    assert.equal(e.firstReadAt, later(60).toISOString());
+    assert.equal(e.lastReadAt, later(60).toISOString());
+    assert.equal((await s.markSelfView('et_missing01')).found, false);
+  });
+
+  test(`[${name}] self-view لإيميل فتحه الوحيد وهمي: يرجع "لم يُقرأ"`, async () => {
+    const s = make();
+    await s.saveEmail(rec('et_selfview2'));
+    await s.recordOpen('et_selfview2', hit, { now: later(10) });
+    await s.markSelfView('et_selfview2', { windowMs: 30000, now: later(12) });
+    const e = await s.getEmail('et_selfview2');
+    assert.equal(e.openCount, 0);
+    assert.equal(e.isRead, false);
+    assert.equal(e.firstReadAt, null);
+    assert.equal((await s.getStats()).totalRead, 0);
+  });
 }
 
 test('[memory] الحفظ في ملف والتحميل منه (بما فيه صيغة السجلات القديمة)', async () => {

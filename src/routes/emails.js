@@ -43,6 +43,14 @@ function createApiRouter({ store, config }) {
     res.json({ success: true, email });
   }));
 
+  // الإضافة بتبلّغ إن الراسل نفسه شاف الرسالة (عشان نلغي الفتح الوهمي)
+  router.post('/emails/:id/self-view', wrap(async (req, res) => {
+    if (!isValidId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const r = await store.markSelfView(req.params.id, { windowMs: config.selfViewWindowMs });
+    if (!r.found) return res.status(404).json({ error: 'Email not found' });
+    res.json({ success: true, discarded: r.discarded });
+  }));
+
   router.delete('/emails/:id', wrap(async (req, res) => {
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
     const deleted = await store.deleteEmail(req.params.id);

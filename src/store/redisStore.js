@@ -13,7 +13,8 @@ const K = {
   count: 'et:v2:count',
   first: 'et:v2:first',
   last: 'et:v2:last',
-  reads: (id) => `et:v2:reads:${id}`
+  reads: (id) => `et:v2:reads:${id}`,
+  mute: (id) => `et:v2:mute:${id}` // مفتاح مؤقت (PX) طول ما الراسل بيشوف رسالته
 };
 
 const asObject = (v) => (typeof v === 'string' ? safeParse(v) : v) || null;
@@ -62,6 +63,7 @@ function createRedisStore(redis, { maxReads = 50 } = {}) {
       if (!meta) return { recorded: false, reason: 'unknown' };
       const base = Date.parse(meta.registeredAt || meta.sentAt);
       if (now.getTime() - base < graceMs) return { recorded: false, reason: 'self-open' };
+      if (await redis.get(K.mute(id))) return { recorded: false, reason: 'self-view' };
 
       const ts = now.toISOString();
       const p = redis.pipeline();
@@ -72,6 +74,37 @@ function createRedisStore(redis, { maxReads = 50 } = {}) {
       p.ltrim(K.reads(id), 0, maxReads - 1);
       await p.exec();
       return { recorded: true };
+    },
+
+    // الراسل شاف رسالته: الغي الفتحات اللي في آخر windowMs، واتجاهل اللي هييجي في الـ windowMs الجاية.
+    // (مش ذرّي 100%، بس السباق الوحيد هو فتح حقيقي في نفس الثواني دي بالظبط)
+    async markSelfView(id, { windowMs = 30000, now = new Date() } = {}) {
+      const meta = asObject(await redis.hget(K.meta, id));
+      if (!meta) return { found: false, discarded: 0 };
+      await redis.set(K.mute(id), '1', { px: windowMs });
+
+      const since = now.getTime() - windowMs;
+      const reads = ((await redis.lrange(K.reads(id), 0, -1)) || []).map(normalizeRead).filter(Boolean);
+      const keep = reads.filter((r) => Date.parse(r.timestamp) < since);
+      const recent = reads.length - keep.length;
+      if (recent === 0) return { found: true, discarded: 0 };
+
+      const count = Number(await redis.hget(K.count, id)) || 0;
+      const discarded = Math.min(count, recent);
+      const left = count - discarded;
+      const p = redis.pipeline();
+      p.del(K.reads(id));
+      for (const r of keep.slice().reverse()) p.lpush(K.reads(id), JSON.stringify(r));
+      if (left <= 0) {
+        p.hdel(K.count, id); p.hdel(K.first, id); p.hdel(K.last, id);
+      } else {
+        p.hincrby(K.count, id, -discarded);
+        if (keep.length) p.hset(K.last, { [id]: keep[0].timestamp });
+        const first = await redis.hget(K.first, id);
+        if (first && Date.parse(first) >= since && keep.length) p.hset(K.first, { [id]: keep[keep.length - 1].timestamp });
+      }
+      await p.exec();
+      return { found: true, discarded };
     },
 
     async getEmail(id) {
@@ -111,6 +144,7 @@ function createRedisStore(redis, { maxReads = 50 } = {}) {
       p.hdel(K.first, id);
       p.hdel(K.last, id);
       p.del(K.reads(id));
+      p.del(K.mute(id));
       const [removed] = await p.exec();
       return Number(removed) > 0;
     },

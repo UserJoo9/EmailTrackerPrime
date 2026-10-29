@@ -77,24 +77,23 @@
   // 1. SYNCHRONOUS CAPTURE TRACKING (FIRES ON MOUSEDOWN BEFORE GMAIL SENDS)
   // --------------------------------------------------------------------------
 
+  const EMAIL_ONE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+
+  // عنوان تبويب Gmail بيحتوي إيميل الحساب: "Inbox (3) - you@gmail.com - Gmail" (الأوثق).
+  // احتياطي: زر حساب Google. مفيش [data-email] لأنه بيمسك إيميلات المستلمين في القوائم.
   function getMyEmail() {
     if (cachedMe) return cachedMe;
     let found = '';
     try {
-      const userEl = document.querySelector(
-        'header [aria-label*="@"], a[href*="SignOutOptions"], .gb_d[aria-label*="@"], [data-email]'
-      );
-      if (userEl) {
-        const text = (userEl.getAttribute('aria-label') || userEl.getAttribute('data-email') || userEl.getAttribute('href') || '');
-        const match = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-        if (match) found = match[0].toLowerCase().trim();
-      }
+      const m = (document.title || '').match(EMAIL_ONE);
+      if (m) found = m[0].toLowerCase();
       if (!found) {
-        // عنوان تبويب Gmail بيحتوي إيميل الحساب: "Inbox (3) - you@gmail.com - Gmail"
-        const m = (document.title || '').match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-        if (m) found = m[0].toLowerCase().trim();
+        const acct = document.querySelector('a[aria-label^="Google Account"], a[href*="SignOutOptions"], .gb_d[aria-label*="@"]');
+        const am = acct && (acct.getAttribute('aria-label') || '').match(EMAIL_ONE);
+        if (am) found = am[0].toLowerCase();
       }
     } catch (e) { /* ignore */ }
+    // مبنخزّنش غير اللي جه من العنوان/الزر (ثابت طول الجلسة)
     cachedMe = found;
     return found;
   }
@@ -121,54 +120,83 @@
     );
   }
 
+  // جسم الرسالة الحقيقي في Gmail. الترتيب مهم: الـ selectors الصارمة الأول.
+  // قبل كده كنا بناخد أول contenteditable نلاقيه وإحنا طالعين من زر Send، وده كان ممكن يطلع
+  // مربع تاني (زي "Help me write" أو خانة جنب الـ toolbar) مش جسم الرسالة. النتيجة: Gmail بيعيد
+  // رسم المربع ده ويشيل الـ pixel فوراً، والمستلم/الموضوع مش بيتلاقوا لأن الـ container غلط.
+  const BODY_STRICT = [
+    'div[g_editable="true"][contenteditable="true"]',
+    'div.Am.Al.editable[contenteditable="true"]',
+    'div[contenteditable="true"][aria-label="Message Body" i]',
+    'div[contenteditable="true"][aria-label="نص الرسالة"]',
+    'div[contenteditable="true"][aria-label*="الرسالة"]'
+  ].join(', ');
+  const BODY_LOOSE = 'div[contenteditable="true"][role="textbox"], div[contenteditable="true"]';
+  const COMPOSE_ROOT = '[role="dialog"], .M9, .AD, .aoI, .iN, .ip, .adn';
+  const COMPOSE_HINTS = 'input[name="subjectbox"], input[name="to"], input[role="combobox"], [peoplekit-id], .agP, .aoD';
+
+  function bodyScore(el) {
+    let score = 0;
+    const label = (el.getAttribute('aria-label') || '').toLowerCase();
+    if (el.getAttribute('role') === 'textbox') score += 1;
+    if (/message|body|الرسالة/.test(label)) score += 4;
+    if (el.closest('[role="dialog"] [role="dialog"]')) score -= 2; // مربع جوه مربع (prompt)
+    score += Math.min(4, Math.floor(((el.offsetWidth || 0) * (el.offsetHeight || 0)) / 20000));
+    return score;
+  }
+
+  function bestBodyIn(scope, selector) {
+    const list = Array.from(scope.querySelectorAll(selector)).filter((e) => !e.closest('.et-modal-overlay'));
+    if (list.length === 0) return null;
+    if (list.length === 1) return list[0];
+    return list.reduce((best, e) => (bodyScore(e) > bodyScore(best) ? e : best), list[0]);
+  }
+
+  // الـ container = الصندوق اللي فيه الجسم + الموضوع/المستلمين (مش أصغر حاجة فيها contenteditable)
+  function composeRootOf(bodyEl) {
+    let curr = bodyEl.parentElement;
+    for (let i = 0; curr && curr !== document.body && i < 25; i++, curr = curr.parentElement) {
+      if (curr.querySelector(COMPOSE_HINTS)) return curr;
+    }
+    return bodyEl.closest(COMPOSE_ROOT) || document.body;
+  }
+
+  function findBodyFrom(start, selector) {
+    let curr = start;
+    while (curr && curr !== document.documentElement) {
+      const ed = bestBodyIn(curr, selector);
+      if (ed) return ed;
+      curr = curr.parentElement;
+    }
+    return null;
+  }
+
   function getActiveComposeContext(triggerEl) {
-    let container = null;
     let bodyEl = null;
 
-    // 1. Walk up from triggerEl to find a container with an editable message body
+    // 1. من زر الإرسال لفوق: الجسم الحقيقي الأول، وبعدين أي contenteditable كحل أخير
     if (triggerEl) {
-      let curr = triggerEl;
-      while (curr && curr !== document.body) {
-        const ed = curr.querySelector('div[contenteditable="true"][role="textbox"], div[contenteditable="true"], .Am.Al.editable');
-        if (ed) {
-          bodyEl = ed;
-          container = curr;
-          break;
-        }
-        curr = curr.parentElement;
-      }
+      bodyEl = findBodyFrom(triggerEl, BODY_STRICT) || findBodyFrom(triggerEl, BODY_LOOSE);
     }
 
-    // 2. Focused element in compose box
+    // 2. Ctrl+Enter: العنصر اللي عليه الفوكس
     if (!bodyEl) {
       const active = document.activeElement;
-      if (active) {
-        if (active.isContentEditable || active.getAttribute('role') === 'textbox') {
-          bodyEl = active;
-          container = active.closest('div[role="dialog"], .AD, .M9, .inboxsdk__compose, .adn.ads, [role="listitem"], .ip, .aoI, form') || document.body;
-        } else {
-          const parentBox = active.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form');
-          if (parentBox) {
-            bodyEl = parentBox.querySelector('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-            container = parentBox;
-          }
-        }
+      if (active && active !== document.body) {
+        bodyEl = (active.closest && active.closest(BODY_STRICT)) ||
+          findBodyFrom(active, BODY_STRICT) ||
+          (active.isContentEditable ? active : null);
       }
     }
 
-    // 3. Fallback: Any visible editable on the page
+    // 3. أي جسم رسالة ظاهر في الصفحة
     if (!bodyEl) {
-      const editables = document.querySelectorAll('div[contenteditable="true"], div[role="textbox"], .Am.Al.editable');
-      for (const el of editables) {
-        if (el.offsetParent !== null) {
-          bodyEl = el;
-          container = el.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form') || document.body;
-          break;
-        }
-      }
+      const all = Array.from(document.querySelectorAll(BODY_STRICT));
+      bodyEl = all.find((e) => e.offsetParent !== null) || all[0] || bestBodyIn(document.body, BODY_LOOSE);
     }
 
-    return { bodyEl, container: container || document.body };
+    if (!bodyEl) return { bodyEl: null, container: document.body };
+    return { bodyEl, container: composeRootOf(bodyEl) };
   }
 
   function extractRecipientFromPage(container) {
@@ -230,6 +258,17 @@
       }
     }
 
+    // 4b. لو كل رسائل المحادثة مني (متابعة لنفس الشخص): خد "إلى" من آخر رسالة ليا
+    if (recipients.size === 0) {
+      const cards = document.querySelectorAll('.adn.ads');
+      for (let i = cards.length - 1; i >= 0 && recipients.size === 0; i--) {
+        cards[i].querySelectorAll('.hb [email], span.g2[email], .hb [data-hovercard-id]').forEach((el) => {
+          addEmail(el.getAttribute('email'));
+          addEmail(el.getAttribute('data-hovercard-id'));
+        });
+      }
+    }
+
     // 5. Fallback: contact display name in reply header (e.g. "To: Whacka")
     if (recipients.size === 0) {
       const headerChips = searchScope.querySelectorAll('.aoT, .vN, .vR');
@@ -272,18 +311,53 @@
     return { subject: 'متابعة / رد', isFollowUp: true };
   }
 
+  // الحقن عبر محرر Gmail نفسه (execCommand) عشان يسجّل العقدة في نموذجه ومايشيلهاش،
+  // مع fallback للإضافة المباشرة. بنحطها جوه آخر div[dir] لو موجود (زي ما Gmail بيكتب الجسم).
+  function insertPixel(bodyEl, pixelImg) {
+    let done = false;
+    try {
+      const sel = window.getSelection();
+      const prev = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+      const target = bodyEl.querySelector(':scope > div[dir]:last-of-type') || bodyEl;
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      done = document.execCommand('insertHTML', false, pixelImg.outerHTML);
+      if (prev) { sel.removeAllRanges(); sel.addRange(prev); }
+    } catch (e) { done = false; }
+    if (!done || !bodyEl.querySelector(`img[data-et-id="${pixelImg.getAttribute('data-et-id')}"]`)) {
+      const target = bodyEl.querySelector(':scope > div[dir]:last-of-type') || bodyEl;
+      target.appendChild(pixelImg);
+      bodyEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  // لو أي إضافة تانية (زي Mailtrack) أو Gmail أعاد كتابة جسم الرسالة وشال الـ pixel، نرجّعه.
+  function guardPixel(bodyEl, pixelImg, trackingId) {
+    [30, 120, 350, 800].forEach((ms) => {
+      setTimeout(() => {
+        if (!bodyEl.isConnected || bodyEl.querySelector(`img[data-et-id="${trackingId}"]`)) return;
+        console.warn(`[EmailTracker] pixel ${trackingId} was removed from the compose body (${ms}ms): re-attaching.`);
+        insertPixel(bodyEl, pixelImg);
+      }, ms);
+    });
+  }
+
   // Core tracking function executed SYNCHRONOUSLY
-  function processTracking(triggerBtn) {
+  function processTracking(triggerBtn, source) {
     try {
       const { bodyEl, container } = getActiveComposeContext(triggerBtn);
       if (!bodyEl) {
-        console.warn('[EmailTracker] No editable body found.');
+        console.warn(`[EmailTracker] (${source}) No editable body found.`);
         return;
       }
 
       // Debounce: prevent running twice within 2 seconds on the same body
       const lastInjected = bodyEl.getAttribute('data-et-time');
       if (lastInjected && (Date.now() - Number(lastInjected) < 2000)) {
+        console.debug(`[EmailTracker] (${source}) ignored: already handled this compose.`);
         return;
       }
       bodyEl.setAttribute('data-et-time', String(Date.now()));
@@ -298,22 +372,23 @@
       // 2. ولّد ID وحط الـ pixel بشكل متزامن قبل ما Gmail يبعت
       const trackingId = ETP.newTrackingId();
       const pixelImg = el('img', {
-        src: `${currentServerUrl}/track/pixel/${trackingId}`,
+        src: `${currentServerUrl}/track/pixel/${trackingId}`, // المسار ده شغال على النسخة المرفوعة حالياً
         alt: '',
         width: '1',
         height: '1',
         'data-et-id': trackingId
       });
-      pixelImg.style.cssText = 'display:none!important;width:1px!important;height:1px!important;border:0;padding:0;margin:0;';
+      pixelImg.style.cssText = 'width:1px;height:1px;border:0;padding:0;margin:0;opacity:0;';
 
-      bodyEl.appendChild(pixelImg);
-      bodyEl.dispatchEvent(new Event('input', { bubbles: true }));
+      insertPixel(bodyEl, pixelImg);
+      recentlyInjected.add(trackingId);
+      guardPixel(bodyEl, pixelImg, trackingId);
 
       // 3. Extract metadata
       const recipient = extractRecipientFromPage(container);
       const { subject, isFollowUp } = extractSubjectFromPage(container);
 
-      console.log(`%c[EmailTracker INJECTED]%c ID: ${trackingId} | To: ${recipient} | Subject: ${subject}`, 'color: #10b981; font-weight: bold;', 'color: auto;');
+      console.log(`%c[EmailTracker INJECTED]%c via ${source} | ID: ${trackingId} | To: ${recipient} | Subject: ${subject}`, 'color: #10b981; font-weight: bold;', 'color: auto;');
 
       const payload = {
         id: trackingId,
@@ -337,16 +412,22 @@
     }
   }
 
-  // mousedown في مرحلة الـ capture: بيشتغل قبل ما Gmail يبعت ويقفل نافذة الكتابة.
-  // click احتياطي للإرسال بالكيبورد على الزر (processTracking عنده debounce فمفيش تكرار).
+  // لازم الـ pixel يتحقن قبل ما Gmail يلقط الرسالة للإرسال. pointerdown بيحصل قبل mousedown،
+  // وGmail ممكن يلقط عنده، فبنسمع للتلاتة في مرحلة الـ capture. processTracking عنده debounce
+  // (ثانيتين على نفس نافذة الكتابة) فمفيش تسجيل مكرر. وclick احتياطي للإرسال بالكيبورد على الزر.
+  document.addEventListener('pointerdown', (e) => {
+    const sendBtn = findSendButton(e.target);
+    if (sendBtn) processTracking(sendBtn, 'pointerdown');
+  }, true);
+
   document.addEventListener('mousedown', (e) => {
     const sendBtn = findSendButton(e.target);
-    if (sendBtn) processTracking(sendBtn);
+    if (sendBtn) processTracking(sendBtn, 'mousedown');
   }, true);
 
   document.addEventListener('click', (e) => {
     const sendBtn = findSendButton(e.target);
-    if (sendBtn) processTracking(sendBtn);
+    if (sendBtn) processTracking(sendBtn, 'click');
   }, true);
 
   document.addEventListener('keydown', (e) => {
@@ -357,7 +438,7 @@
         active.getAttribute('role') === 'textbox' ||
         active.closest('div[role="dialog"], .AD, .M9, .adn.ads, .ip, .aoI, form')
       );
-      if (isInCompose) processTracking(null);
+      if (isInCompose) processTracking(null, 'ctrl+enter');
     }
   }, true);
 
@@ -391,11 +472,9 @@
         badge.dataset.recip = detectedRecip;
         badge.replaceChildren(el('span', { class: 'et-dot' }), el('span', { text: labelText }));
         badge.title = `EmailTracker Prime نشط!\nالمستلم: ${detectedRecip}\nسيتم تتبع فتح هذا الإيميل تلقائياً.`;
-        if (sendBtn.nextSibling) {
-          toolbar.insertBefore(badge, sendBtn.nextSibling);
-        } else {
-          toolbar.appendChild(badge);
-        }
+        // نحط الشارة بعد زر الإرسال في نفس الأب بتاعه (الـ toolbar مش دايماً الأب المباشر)
+        if (sendBtn.parentNode) sendBtn.parentNode.insertBefore(badge, sendBtn.nextSibling);
+        else toolbar.appendChild(badge);
       }
     });
   }
@@ -721,14 +800,41 @@
     });
   }
 
-  // عطّل الـ pixels في عرض الراسل لرسائله (Sent فقط). في Inbox مبنلمسش حاجة.
+  // لما الراسل يشوف رسالته المتتبعة (في Sent، أو في المحادثة بعد ما يرد مباشرة) Gmail بيحمّل الـ pixel
+  // عن طريق الـ proxy بتاعه، والسيرفر مش بيقدر يفرّق ده عن فتح المستلم. فـ:
+  //  1) بنعطّل الصورة (عشان مايتحملش تاني)
+  //  2) بنبلّغ السيرفر إن ده الراسل، فيلغي أي فتح اتسجل في الثواني دي.
+  // بنعمل كده بس للـ IDs بتاعتنا (من الكاش أو اللي لسه حاقنينها)، فلو المستلم عنده الإضافة مش هتأثر.
   const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const PIXEL_ID_RE = /\/(?:(?:track\/)?pixel|i)\/(et_[A-Za-z0-9_-]+?)(?:\.(?:gif|png))?(?=$|[?#&\s"'])/;
+  const recentlyInjected = new Set();
+  const selfViewReported = new Map(); // id -> ms
+  const SELF_VIEW_REPORT_EVERY_MS = 20000;
+
+  function isOwnId(id) {
+    return recentlyInjected.has(id) || trackedEmails.some((e) => e && e.id === id);
+  }
+
+  function reportSelfView(id) {
+    const last = selfViewReported.get(id) || 0;
+    if (Date.now() - last < SELF_VIEW_REPORT_EVERY_MS) return;
+    selfViewReported.set(id, Date.now());
+    try {
+      chrome.runtime.sendMessage({ type: 'SELF_VIEW', emailId: id }, () => { void chrome.runtime.lastError; });
+    } catch (e) { /* السياق اتقفل بعد تحديث الإضافة */ }
+  }
+
   function neutralizeSelfPixels() {
-    if (!window.location.hash.includes('#sent')) return;
+    const inSent = window.location.hash.includes('#sent');
     document.querySelectorAll('img').forEach((p) => {
-      if (p.src !== BLANK_GIF && ETP.PIXEL_SRC_RE.test(p.getAttribute('src') || '') && !p.closest('[contenteditable="true"]')) {
-        p.src = BLANK_GIF;
-      }
+      if (p.closest('[contenteditable="true"]')) return; // ده جسم رسالة لسه بتتكتب
+      const src = p.getAttribute('src') || '';
+      if (src === BLANK_GIF) return;
+      const m = src.match(PIXEL_ID_RE);
+      if (!m) return;
+      const own = isOwnId(m[1]);
+      if (own) reportSelfView(m[1]);
+      if (own || inSent) p.src = BLANK_GIF;
     });
   }
 

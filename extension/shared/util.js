@@ -13,16 +13,17 @@
     },
 
     // نفس صيغة الـ ID اللي السيرفر بيقبلها: ^[A-Za-z0-9_-]{8,64}$
+    // الشكل et_<timestamp>_<عشوائي base36>: نفس شكل النسخة اللي اتجربت مع Gmail. الـ hex الطويل
+    // (32 حرف) كان ممكن يطابق فلاتر مانعات الإعلانات فيفشل تحميل الصورة وGmail يشيلها.
     newTrackingId() {
-      const c = globalThis.crypto;
-      if (c && typeof c.randomUUID === 'function') return 'et_' + c.randomUUID().replace(/-/g, '');
-      const bytes = new Uint8Array(16);
-      c.getRandomValues(bytes);
-      return 'et_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      const bytes = new Uint8Array(10);
+      globalThis.crypto.getRandomValues(bytes);
+      const rand = Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+      return `et_${Date.now()}_${rand}`;
     },
 
     // pixel بتاعنا (جديد أو قديم) بغض النظر عن الدومين
-    PIXEL_SRC_RE: /\/(?:track\/)?pixel\/et_[A-Za-z0-9_-]+/,
+    PIXEL_SRC_RE: /\/(?:(?:track\/)?pixel|i)\/et_[A-Za-z0-9_-]+/,
 
     formatTime(iso, timezone) {
       if (!iso) return '';

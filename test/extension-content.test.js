@@ -93,7 +93,7 @@ test('الرد على رسالة فيها pixel قديم: القديم يتشا�
   const body = t.document.getElementById('body');
   body.insertAdjacentHTML('beforeend', '<blockquote><img src="https://old.example.com/pixel/et_oldoldold1.gif" data-et-id="et_oldoldold1"><img id="logo" src="https://cdn.example.com/logo.png"></blockquote>');
   fire(t.window, t.document.getElementById('send-label'), 'mousedown');
-  const pixels = [...body.querySelectorAll('img')].filter((i) => /pixel\/et_/.test(i.getAttribute('src')));
+  const pixels = [...body.querySelectorAll('img')].filter((i) => /\/(pixel|i)\/et_/.test(i.getAttribute('src')));
   assert.equal(pixels.length, 1);
   assert.notEqual(pixels[0].getAttribute('data-et-id'), 'et_oldoldold1');
   assert.ok(body.querySelector('#logo'), 'الصور العادية ما بتتشالش');
@@ -153,4 +153,100 @@ test('neutralize: pixels في عرض Sent بتتعطل، وفي Inbox لأ', asy
   inbox.document.body.appendChild(inbox.document.createElement('i'));
   await new Promise((r) => setTimeout(r, 450));
   assert.match(inbox.document.getElementById('px').src, /tracker\.example\.com/);
+});
+
+test('متابعة جوه محادثة كل رسائلها مني: المستلم بيتاخد من "إلى" في آخر رسالة', () => {
+  const html = `
+  <header><a aria-label="Google Account: Me (me@gmail.com)">me</a></header>
+  <h2 class="hP">Read Test</h2>
+  <div class="adn ads"><div class="gH"><span class="gD" email="me@gmail.com">Me</span>
+    <div class="hb"><span class="g2" email="joodevo890@gmail.com">joodevo890@gmail.com</span></div><div class="gK"></div></div></div>
+  <div class="aoI"><div contenteditable="true" role="textbox" id="body">Retest</div>
+    <div role="button" class="T-I aoO" data-tooltip="Send (Ctrl-Enter)"><span id="send-label">Send</span></div></div>`;
+  const t = boot({ html });
+  fire(t.window, t.document.getElementById('send-label'), 'mousedown');
+  const payload = registrations(t.sent)[0].payload;
+  assert.equal(payload.recipient, 'joodevo890@gmail.com');
+  assert.equal(payload.isFollowUp, true);
+});
+
+test('الـ pixel بيتحقن عند pointerdown (قبل mousedown/click) ومفيش تسجيل مكرر بعده', () => {
+  const t = boot();
+  const label = t.document.getElementById('send-label');
+  label.dispatchEvent(new t.window.Event('pointerdown', { bubbles: true, cancelable: true }));
+  assert.equal(t.document.querySelectorAll('#body img[data-et-id]').length, 1, 'pixel موجود بعد pointerdown لوحده');
+  assert.equal(registrations(t.sent).length, 1);
+
+  fire(t.window, label, 'mousedown');
+  fire(t.window, label, 'click');
+  assert.equal(registrations(t.sent).length, 1);
+  assert.equal(t.document.querySelectorAll('#body img[data-et-id]').length, 1);
+});
+
+test('تحديد إيميلي: من عنوان التبويب، ومش من [data-email] بتاع مستلم في القائمة', () => {
+  const html = `<span data-email="client@acme.com" email="client@acme.com">Client</span>` + GMAIL_HTML.replace(' aria-label="Google Account: Me (me@gmail.com)"', '');
+  const t = boot({ html });
+  fire(t.window, t.document.getElementById('send-label'), 'mousedown');
+  assert.match(registrations(t.sent)[0].payload.recipient, /client@acme\.com/);
+});
+
+test('لو إضافة تانية شالت الـ pixel من جسم الرسالة: بيتحط تاني', async () => {
+  const t = boot();
+  const body = t.document.getElementById('body');
+  fire(t.window, t.document.getElementById('send-label'), 'mousedown');
+  const id = body.querySelector('img[data-et-id]').getAttribute('data-et-id');
+  body.innerHTML = 'Hi there (rewritten by another extension)'; // الـ pixel اتشال
+  assert.equal(body.querySelector('img'), null);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(body.querySelectorAll(`img[data-et-id="${id}"]`).length, 1);
+});
+
+test('نافذة كتابة جديدة فيها مربع contenteditable تاني جنب زر Send: الـ pixel يروح لجسم الرسالة والمستلم/الموضوع صح', () => {
+  const html = `
+<header><a aria-label="Google Account: Me (me@gmail.com)">me</a></header>
+<div class="nH fullpage">
+  <div class="recips"><div class="afV" data-hovercard-id="client@acme.com">Client</div><div class="afV" data-hovercard-id="me@gmail.com">Me</div></div>
+  <input name="subjectbox" value="Launch plan">
+  <div class="Am Al editable" g_editable="true" contenteditable="true" role="textbox" aria-label="Message Body" id="realbody"><div dir="ltr">Hello</div></div>
+  <div class="toolbar">
+    <div contenteditable="true" id="decoy" aria-label="Help me write"></div>
+    <div role="button" class="T-I aoO" data-tooltip="Send (Ctrl-Enter)" id="send2">Send</div>
+  </div>
+</div>`;
+  const t = boot({ html });
+  fire(t.window, t.document.getElementById('send2'), 'pointerdown');
+  assert.equal(t.document.querySelectorAll('#decoy img').length, 0, 'مفيش pixel في المربع الغلط');
+  const px = t.document.querySelector('#realbody img[data-et-id]');
+  assert.ok(px, 'pixel جوه جسم الرسالة');
+  const regs = registrations(t.sent);
+  assert.equal(regs.length, 1);
+  assert.equal(regs[0].payload.recipient, 'client@acme.com');
+  assert.equal(regs[0].payload.subject, 'Launch plan');
+});
+
+test('الراسل بيشوف رده في المحادثة (Inbox) بعد الإرسال: الـ pixel بتاعه يتعطل ويتبلّغ السيرفر مرة واحدة', async () => {
+  const proxied = 'https://ci3.googleusercontent.com/meips/ADKq_abc=s0-d-e1-ft#https://tracker.example.com/track/pixel/et_selfview001';
+  const html = GMAIL_HTML + `<div class="adn ads" id="mine"><img id="px" src="${proxied}"></div>`
+    + '<div class="adn ads"><img id="other" src="https://tracker.example.com/track/pixel/et_someone001"></div>';
+  const t = boot({ hash: '#inbox', html, cachedEmails: [{ id: 'et_selfview001', recipient: 'client@acme.com', subject: 'x', sentAt: new Date().toISOString() }] });
+  t.document.body.appendChild(t.document.createElement('i'));
+  await new Promise((r) => setTimeout(r, 450));
+  t.document.body.appendChild(t.document.createElement('i'));
+  await new Promise((r) => setTimeout(r, 450));
+
+  assert.match(t.document.getElementById('px').src, /^data:image\/gif/, 'الـ pixel بتاعي اتعطل');
+  assert.match(t.document.getElementById('other').src, /tracker\.example\.com/, 'pixel حد تانا ماتلمسش (في Inbox)');
+  const reports = t.sent.filter((m) => m.type === 'SELF_VIEW');
+  assert.deepEqual(reports.map((m) => m.emailId), ['et_selfview001']);
+});
+
+test('إيميل لسه متبعت (قبل ما الكاش يتحدث) برضه بيتعرف إنه بتاعي', async () => {
+  const t = boot();
+  fire(t.window, t.document.getElementById('send-label'), 'pointerdown');
+  const id = registrations(t.sent)[0].payload.id;
+  const view = t.document.createElement('div');
+  view.innerHTML = `<img id="echo" src="https://ci3.googleusercontent.com/meips/x#https://tracker.example.com/track/pixel/${id}">`;
+  t.document.body.appendChild(view);
+  await new Promise((r) => setTimeout(r, 450));
+  assert.deepEqual(t.sent.filter((m) => m.type === 'SELF_VIEW').map((m) => m.emailId), [id]);
 });

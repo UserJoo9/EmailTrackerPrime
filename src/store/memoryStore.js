@@ -8,6 +8,7 @@ const { toView, sortBySentDesc, normalizeRead } = require('./shape');
 // ملاحظة: على Vercel لازم Redis، الملفات هناك مؤقتة.
 function createMemoryStore({ persistPath, maxReads = 50 } = {}) {
   let emails = {};
+  const mutedUntil = new Map(); // id -> ms
   let writeChain = Promise.resolve();
 
   if (persistPath) {
@@ -66,6 +67,7 @@ function createMemoryStore({ persistPath, maxReads = 50 } = {}) {
       if (!e) return { recorded: false, reason: 'unknown' };
       const base = Date.parse(e.registeredAt || e.sentAt);
       if (now.getTime() - base < graceMs) return { recorded: false, reason: 'self-open' };
+      if ((mutedUntil.get(id) || 0) > now.getTime()) return { recorded: false, reason: 'self-view' };
 
       const ts = now.toISOString();
       e.openCount += 1;
@@ -75,6 +77,28 @@ function createMemoryStore({ persistPath, maxReads = 50 } = {}) {
       e.reads.length = Math.min(e.reads.length, maxReads);
       await persist();
       return { recorded: true };
+    },
+
+    // الراسل شاف رسالته: الغي الفتحات اللي في آخر windowMs، واتجاهل اللي هييجي في الـ windowMs الجاية
+    async markSelfView(id, { windowMs = 30000, now = new Date() } = {}) {
+      const e = emails[id];
+      if (!e) return { found: false, discarded: 0 };
+      mutedUntil.set(id, now.getTime() + windowMs);
+      const since = now.getTime() - windowMs;
+      const keep = e.reads.filter((r) => Date.parse(r.timestamp) < since);
+      const discarded = Math.min(e.openCount, e.reads.length - keep.length);
+      if (discarded > 0) {
+        e.reads = keep;
+        e.openCount -= discarded;
+        if (e.openCount <= 0) {
+          e.openCount = 0; e.firstReadAt = null; e.lastReadAt = null;
+        } else {
+          e.lastReadAt = keep.length ? keep[0].timestamp : e.lastReadAt;
+          if (e.firstReadAt && Date.parse(e.firstReadAt) >= since) e.firstReadAt = keep.length ? keep[keep.length - 1].timestamp : null;
+        }
+        await persist();
+      }
+      return { found: true, discarded };
     },
 
     async getEmail(id) {

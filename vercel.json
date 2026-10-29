@@ -16,6 +16,10 @@
       "destination": "/api/index.js"
     },
     {
+      "source": "/i/:path*",
+      "destination": "/api/index.js"
+    },
+    {
       "source": "/pixel/:path*",
       "destination": "/api/index.js"
     },

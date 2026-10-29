@@ -188,6 +188,18 @@ async function clearAll() {
   return { success: true };
 }
 
+// الراسل شاف رسالته: السيرفر يلغي الفتح الوهمي اللي حصل دلوقتي
+async function reportSelfView(id) {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) return { success: false, error: 'Invalid id' };
+  try {
+    const res = await api(`/api/emails/${encodeURIComponent(id)}/self-view`, { method: 'POST', body: {} });
+    if (res && res.discarded > 0) refresh().catch(() => {});
+    return { success: true, discarded: res ? res.discarded : 0 };
+  } catch (err) {
+    return { success: false, error: stateFromError(err) };
+  }
+}
+
 // ---------------------------------------------------------------- wiring
 
 const handlers = {
@@ -197,7 +209,8 @@ const handlers = {
   GET_EMAIL_STATUS: (req) => getEmailStatus(req.emailId),
   GET_STATS: () => getStats(),
   CHECK_SERVER: (req) => checkServer(req.settings),
-  CLEAR_ALL: () => clearAll()
+  CLEAR_ALL: () => clearAll(),
+  SELF_VIEW: (req) => reportSelfView(req.emailId)
 };
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

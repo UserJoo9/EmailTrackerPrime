@@ -20,7 +20,7 @@ function createPixelRouter({ store, config }) {
 
   async function handler(req, res) {
     // يدعم الروابط القديمة: /pixel/<id>.gif
-    const id = String(req.params.id || '').replace(/\.gif$/i, '');
+    const id = String(req.params.id || '').replace(/\.(gif|png)$/i, '');
 
     if (isValidId(id)) {
       const userAgent = req.get('user-agent') || '';
@@ -45,6 +45,8 @@ function createPixelRouter({ store, config }) {
   // المسارين القدام لازم يفضلوا شغالين عشان الإيميلات اللي اتبعتت بالفعل
   router.get('/track/pixel/:id', handler);
   router.get('/pixel/:id', handler);
+  // مسار محايد (بدون كلمتي track/pixel) لأن مانعات التتبع بتشيل الصور اللي رابطها فيه الكلمات دي
+  router.get('/i/:id', handler);
   return router;
 }
 

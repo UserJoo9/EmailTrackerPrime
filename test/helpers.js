@@ -4,6 +4,7 @@
 function createFakeRedis() {
   const hashes = new Map();
   const lists = new Map();
+  const strings = new Map(); // k -> { v, exp }
 
   const ser = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
   const de = (v) => {
@@ -25,9 +26,11 @@ function createFakeRedis() {
     async hlen(k) { return hash(k).size; },
     async hkeys(k) { return [...hash(k).keys()]; },
     async hdel(k, ...fs) { const h = hash(k); let n = 0; fs.forEach((f) => { if (h.delete(f)) n += 1; }); return n; },
-    async del(...ks) { let n = 0; ks.forEach((k) => { if (hashes.delete(k)) n += 1; if (lists.delete(k)) n += 1; }); return n; },
+    async del(...ks) { let n = 0; ks.forEach((k) => { if (hashes.delete(k)) n += 1; if (lists.delete(k)) n += 1; if (strings.delete(k)) n += 1; }); return n; },
     async lpush(k, ...vs) { const l = lists.get(k) || []; vs.forEach((v) => l.unshift(ser(v))); lists.set(k, l); return l.length; },
     async ltrim(k, a, b) { const l = lists.get(k) || []; lists.set(k, l.slice(a, b + 1)); return 'OK'; },
+    async set(k, v, opts = {}) { strings.set(k, { v: ser(v), exp: opts.px ? Date.now() + opts.px : Infinity }); return 'OK'; },
+    async get(k) { const s = strings.get(k); if (!s || s.exp <= Date.now()) return null; return de(s.v); },
     async lrange(k, a, b) { const l = lists.get(k) || []; return l.slice(a, b === -1 ? undefined : b + 1).map(de); }
   };
 

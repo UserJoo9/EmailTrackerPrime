@@ -41,7 +41,7 @@ test('تسجيل إيميل ثم فتحه بالـ pixel (المسارين ال�
     assert.equal((await reg(base, { id: 'et_testid0001', recipient: 'a@b.com', subject: 'Hi' })).status, 201);
     assert.equal((await reg(base, { id: 'et_testid0001', recipient: 'other', subject: 'x' })).status, 200); // idempotent
 
-    for (const p of ['/track/pixel/et_testid0001?_t=1', '/pixel/et_testid0001', '/pixel/et_testid0001.gif']) {
+    for (const p of ['/track/pixel/et_testid0001?_t=1', '/pixel/et_testid0001', '/pixel/et_testid0001.gif', '/i/et_testid0001.png']) {
       const res = await fetch(base + p, { headers: { 'User-Agent': GMAIL_UA } });
       assert.equal(res.status, 200);
       assert.equal(res.headers.get('content-type'), 'image/gif');
@@ -51,7 +51,7 @@ test('تسجيل إيميل ثم فتحه بالـ pixel (المسارين ال�
     await fetch(`${base}/pixel/et_testid0001`, { headers: { 'User-Agent': 'curl/8' } });
 
     const one = await (await fetch(`${base}/api/emails/et_testid0001`, { headers: auth })).json();
-    assert.equal(one.email.openCount, 3);
+    assert.equal(one.email.openCount, 4);
     assert.equal(one.email.recipient, 'a@b.com');
 
     const stats = await (await fetch(`${base}/api/stats`, { headers: auth })).json();
@@ -104,5 +104,19 @@ test('الداشبورد ملف ثابت بدون بيانات، مع CSP، وم
     assert.equal((await fetch(`${base}/api/emails`, { method: 'DELETE' })).status, 401);
     assert.equal((await fetch(`${base}/api/emails/clear`, { method: 'POST' })).status, 401);
     assert.equal((await fetch(`${base}/api/emails`, { method: 'DELETE', headers: auth })).status, 200);
+  });
+});
+
+test('POST /api/emails/:id/self-view: محمي بالمفتاح، بيلغي الفتح الأخير، 404 لو مش موجود', async () => {
+  await withServer({ selfViewWindowMs: 30000 }, async ({ base }) => {
+    await reg(base, { id: 'et_selfview01', recipient: 'a@b.com', subject: 'Hi' });
+    await fetch(`${base}/track/pixel/et_selfview01`, { headers: { 'User-Agent': GMAIL_UA } });
+    assert.equal((await fetch(`${base}/api/emails/et_selfview01/self-view`, { method: 'POST' })).status, 401);
+    const r = await (await fetch(`${base}/api/emails/et_selfview01/self-view`, { method: 'POST', headers: auth, body: '{}' })).json();
+    assert.equal(r.discarded, 1);
+    await fetch(`${base}/track/pixel/et_selfview01`, { headers: { 'User-Agent': GMAIL_UA } }); // جوه الفترة: يتجاهل
+    const one = await (await fetch(`${base}/api/emails/et_selfview01`, { headers: auth })).json();
+    assert.equal(one.email.openCount, 0);
+    assert.equal((await fetch(`${base}/api/emails/et_nothere001/self-view`, { method: 'POST', headers: auth, body: '{}' })).status, 404);
   });
 });

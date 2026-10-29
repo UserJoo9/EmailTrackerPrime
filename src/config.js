@@ -17,6 +17,9 @@ function loadConfig(env = process.env) {
     dataFile: env.DATA_FILE || path.join(__dirname, '..', 'data', 'emails.json'),
     // تجاهل أي فتح خلال X ملي ثانية من التسجيل (الراسل بيفتح رسالته بنفسه)
     selfOpenGraceMs: Number(env.SELF_OPEN_GRACE_MS) || 4000,
+    // لما الراسل نفسه يشوف رسالته (الرد بيظهر في المحادثة فوراً بعد الإرسال)، الإضافة بتبلّغ السيرفر،
+    // والسيرفر بيلغي أي فتح حصل خلال الفترة دي قبل/بعد البلاغ.
+    selfViewWindowMs: Number(env.SELF_VIEW_WINDOW_MS) || 30000,
     maxReadsPerEmail: 50,
     listLimit: 500,
     syncBatchLimit: 200
